@@ -169,7 +169,7 @@ const DecoupleDiagram: React.FC = () => {
               }} />
             ))}
           </div>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--mint)' }}>Shielded pool</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--mint)' }}>Private pool</span>
         </div>
 
         <Node label="Recipient" sub="claims privately" tone="mint" />
@@ -284,17 +284,17 @@ interface InlineProverProps {
 }
 
 const PROVER_SHIELD_STEPS = [
-  { label: 'Constructing Secret Commitment', sub: 'Generating secret key (r) and nullifier (s) to secure asset.' },
-  { label: 'Inserting Leaf in Merkle Tree', sub: 'Computing Poseidon Hash: h(commitment, amount) and updating accumulator.' },
-  { label: 'Generating ZK-STARK Witness', sub: 'Running circuit constraints to demonstrate valid shielding.' },
-  { label: 'Compiling FRI Cryptographic Proof', sub: 'Finalizing STARK proof and sending payload to Starknet Gateway.' }
+  { label: 'Creating a one-time key', sub: 'A unique private key is generated in your browser — it never leaves your device.' },
+  { label: 'Securing your payment', sub: 'Your funds are locked into the private pool. The amount is hidden on-chain.' },
+  { label: 'Generating privacy proof', sub: 'A cryptographic proof is built so only the key holder can claim the funds.' },
+  { label: 'Confirming on Starknet', sub: 'The transaction is submitted. Your payment is now live and shareable.' }
 ];
 
 const PROVER_CLAIM_STEPS = [
-  { label: 'Decrypting Secret parameters', sub: 'Reading private key and nullifier parameters from URL hash.' },
-  { label: 'Constructing Membership Proof', sub: 'Generating Merkle path sibling indices to verify existence privately.' },
-  { label: 'Verifying STARK Proof on L2', sub: 'Executing verifier contract. Proof constraint system evaluates to true.' },
-  { label: 'Executing Decoupled Relayer Claim', sub: 'Relayer submits on-chain payout payload, paying L2 gas fee.' }
+  { label: 'Reading your payment key', sub: 'The one-time key is read from the link. It is never sent to any server.' },
+  { label: 'Verifying ownership', sub: 'Proving you hold the key — without revealing any personal information.' },
+  { label: 'Confirming on-chain', sub: 'Your proof is verified on Starknet. Everything checks out.' },
+  { label: 'Sending funds to your wallet', sub: 'The payment is released to your address. Done.' }
 ];
 
 const InlineProver: React.FC<InlineProverProps> = ({ type, amount, token, onComplete, connectionType, realTxHash }) => {
@@ -423,7 +423,7 @@ const InlineProver: React.FC<InlineProverProps> = ({ type, amount, token, onComp
       <div className="sl-between" style={{ borderBottom: '1px solid var(--line)', paddingBottom: 10 }}>
         <div className="sl-col" style={{ gap: 3 }}>
           <span className="sl-eyebrow" style={{ color: 'var(--mint)' }}>
-            {type === 'shield' ? 'Shielding in progress' : 'Compiling private claim'}
+            {type === 'shield' ? 'Sending privately' : 'Claiming your payment'}
           </span>
           <span style={{ fontSize: 13, fontWeight: 500 }}>
             Amount: <span className="sl-mono" style={{ fontWeight: 600 }}>{amount} {token}</span>
@@ -431,7 +431,7 @@ const InlineProver: React.FC<InlineProverProps> = ({ type, amount, token, onComp
         </div>
         <div className="sl-row" style={{ gap: 8 }}>
           <div className="spinner"></div>
-          <span className="sl-tiny sl-dim sl-mono">proving...</span>
+          <span className="sl-tiny sl-dim sl-mono">processing...</span>
         </div>
       </div>
 
@@ -449,7 +449,7 @@ const InlineProver: React.FC<InlineProverProps> = ({ type, amount, token, onComp
         </div>
 
         <div className="sl-col">
-          <span className="sl-eyebrow" style={{ marginBottom: 6 }}>Cryptographic Console</span>
+          <span className="sl-eyebrow" style={{ marginBottom: 6 }}>Activity log</span>
           <div style={{
             background: 'var(--bg-0)', border: '1px solid var(--line-2)', borderRadius: 'var(--r-md)',
             padding: 12, fontFamily: 'var(--mono)', fontSize: 10.5, color: '#34D399',
@@ -531,16 +531,16 @@ const ClaimReadyView: React.FC<ClaimReadyViewProps> = ({
       {/* Amount header */}
       <div className="sl-col" style={{ gap: 6, alignItems: 'center' }}>
         <span className="sl-eyebrow">You've received</span>
-        <Amount value={claimLinkData.amount} unit={claimLinkData.token === 'STRK' ? 'STRK20' : 'USDC20'} size={46} tone="mint" />
+        <Amount value={claimLinkData.amount} unit={claimLinkData.token} size={46} tone="mint" />
         {noteCount > 1 && (
-          <span className="sl-tiny sl-muted">{noteCount} private notes · fixed denominations</span>
+          <span className="sl-tiny sl-muted">{noteCount} parts · sent for better privacy</span>
         )}
       </div>
 
       {/* Note breakdown */}
       {denomEntries.length > 0 && (
         <div className="sl-card" style={{ width: '100%', padding: '12px 14px', background: 'var(--bg-1)', gap: 8, display: 'flex', flexDirection: 'column' }}>
-          <span className="sl-tiny" style={{ color: 'var(--text-3)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Note Breakdown</span>
+          <span className="sl-tiny" style={{ color: 'var(--text-3)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Breakdown</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {denomEntries.map(({ denom, count }) => (
               <span key={denom} style={{
@@ -573,25 +573,25 @@ const ClaimReadyView: React.FC<ClaimReadyViewProps> = ({
         </div>
         <span className="sl-tiny sl-muted">
           {waitDone
-            ? 'Deposit and withdrawal are unlinkable on-chain.'
-            : `Waiting for anonymity window: ${minsLeft}m ${secsPart.toString().padStart(2, '0')}s remaining`}
+            ? 'This payment cannot be traced back to the sender.'
+            : `Best to wait a bit longer: ${minsLeft}m ${secsPart.toString().padStart(2, '0')}s remaining`}
         </span>
       </div>
 
       {/* Countdown / Claim CTA */}
       {!waitDone && createdAt > 0 ? (
         <div className="sl-card" style={{ width: '100%', padding: '14px 16px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#f59e0b' }}>⏳ Recommended wait: {minsLeft}m {secsPart.toString().padStart(2, '0')}s</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#f59e0b' }}>⏳ Wait a little longer: {minsLeft}m {secsPart.toString().padStart(2, '0')}s</span>
           <span className="sl-tiny sl-muted" style={{ textAlign: 'center', lineHeight: 1.5 }}>
-            Claiming now may allow timing correlation. For maximum privacy, wait for the window to close.
+            Claiming right away is fine, but waiting a bit makes this payment harder to trace.
           </span>
           {isConnected ? (
             <button className="sl-btn" style={{ height: 42, width: '100%', marginTop: 4, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-2)' }} onClick={onClaim}>
-              Claim anyway (reduced privacy)
+              Claim now anyway
             </button>
           ) : (
             <button className="sl-btn" style={{ height: 42, width: '100%', marginTop: 4, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-2)' }} onClick={onConnect}>
-              Connect to claim anyway
+              Connect wallet to claim now
             </button>
           )}
         </div>
@@ -607,7 +607,7 @@ const ClaimReadyView: React.FC<ClaimReadyViewProps> = ({
         )
       )}
 
-      <span className="sl-tiny sl-dim">No account needed · claimed through a relayer</span>
+      <span className="sl-tiny sl-dim">No account needed · completely private</span>
     </div>
   );
 };
@@ -812,7 +812,7 @@ const LandingHeroVisual: React.FC = () => {
           <QRCode size={96} seed="shieldlink-hero" />
           <div className="sl-col" style={{ gap: 4 }}>
             <span className="sl-eyebrow">Recipient claims</span>
-            <Amount value="450.00" unit="STRK20" size={26} tone="mint" />
+            <Amount value="450.00" unit="STRK" size={26} tone="mint" />
           </div>
         </div>
         <div style={{ padding: '0 18px 18px' }}>
@@ -834,7 +834,7 @@ const LandingHero: React.FC<LandingProp> = ({ onLaunchApp }) => {
           <span className="sl-chip sl-chip-mint"><span className="sl-dot sl-dot-mint sl-live" /> Private payments on Starknet</span>
           <h1 className="lp-h1">Send money on-chain.<br /><em>Reveal nothing.</em></h1>
           <p className="lp-lead">
-            Public blockchains expose every balance and payment. ShieldLink routes funds through the <strong>Tongo</strong> ElGamal privacy pool on Starknet — amounts are encrypted on-chain, and sender addresses are never linked to recipient addresses.
+            Public blockchains expose every balance and payment. ShieldLink routes your money through a private pool on Starknet — no one can see the amount, and your address is never connected to the recipient's.
           </p>
           <div className="lp-cta-row">
             <a 
@@ -879,7 +879,7 @@ const LandingConceptBand: React.FC = () => {
           <div className="lp-concept-card" style={{ background: 'var(--mint-bg)', borderColor: 'var(--mint-line)' }}>
             <div className="sl-row" style={{ gap: 10, marginBottom: 14 }}>
               <Icon name="lock" size={20} style={{ color: 'var(--mint)' }} />
-              <span className="sl-h2" style={{ fontSize: 18, color: 'var(--mint)' }}>Shielded · private</span>
+              <span className="sl-h2" style={{ fontSize: 18, color: 'var(--mint)' }}>Private · protected</span>
             </div>
             <p className="sl-muted" style={{ fontSize: 14.5, lineHeight: 1.6 }}>Inside the pool, amounts are encrypted and relationships are broken. You spend and receive freely — the ledger learns nothing about you.</p>
           </div>
@@ -891,9 +891,9 @@ const LandingConceptBand: React.FC = () => {
 
 const LandingHowItWorks: React.FC = () => {
   const steps = [
-    { ic: 'shield', n: '01', t: 'Fund via Tongo pool', b: "A one-time private key is generated in your browser. Your STRK enters the Tongo pool encrypted under that key — amounts are hidden from everyone." },
-    { ic: 'link', n: '02', t: 'Send a one-time link', b: 'The payment URL carries the one-time Tongo key in its hash fragment. It never touches a server — share it however you like.' },
-    { ic: 'claim', n: '03', t: 'They claim privately', b: "The recipient's browser generates a ZK proof of key ownership and withdraws from Tongo. No address in either transaction connects sender to receiver." },
+    { ic: 'shield', n: '01', t: 'Send privately', b: "A one-time key is created in your browser. Your payment is sent through the private pool — the amount is hidden from everyone on-chain." },
+    { ic: 'link', n: '02', t: 'Share a payment link', b: 'The link carries your one-time key. It never touches a server — share it any way you like.' },
+    { ic: 'claim', n: '03', t: 'They receive privately', b: "The recipient opens the link and receives the funds. Your address and theirs are never connected on-chain." },
   ];
   return (
     <section className="lp-section" id="how" style={{ background: 'var(--bg-1)' }}>
@@ -925,12 +925,12 @@ const LandingHowItWorks: React.FC = () => {
 
 const LandingFeatures: React.FC = () => {
   const feats = [
-    ['shield', 'Tongo encrypted pool', 'Every deposit enters the Tongo privacy pool with ElGamal-encrypted balances — amounts are invisible on-chain.'],
-    ['link', 'One-time Tongo keys', 'A fresh Tongo key is generated per link in your browser. It never touches a server and is destroyed after claim.'],
-    ['lock', 'Client-side ZK proofs', 'Recipients generate a Schnorr-based ownership proof in-browser. The Tongo contract verifies it on Starknet.'],
-    ['refresh', 'No address correlation', "Deposit and claim are two separate on-chain events with no shared address — sender and receiver are unlinkable."],
-    ['unshield', 'On-chain cancel (ragequit)', 'Cancel a link at any time. Tongo ragequit returns funds to your wallet with a verifiable on-chain proof.'],
-    ['check', 'STRK & USDC, non-custodial', 'Works with the assets you already hold. Private keys stay in your browser; ShieldLink never takes custody.'],
+    ['shield', 'Private payment pool', 'Your payment enters a private pool where the amount is hidden on-chain — no one can see what you sent.'],
+    ['link', 'One-time payment links', 'A fresh key is created for every link, right in your browser. It is never stored anywhere and disappears after the payment is claimed.'],
+    ['lock', 'Proven privately', 'The recipient proves they own the link without revealing any personal details. Everything happens in their browser.'],
+    ['refresh', 'Untraceable by design', "Sending and receiving are two separate on-chain events with nothing in common — your address is never linked to the recipient's."],
+    ['unshield', 'Cancel anytime', 'Cancel a link any time and get your money back instantly. No questions asked.'],
+    ['check', 'STRK & USDC, non-custodial', 'Works with the assets you already hold. Your keys stay in your browser — ShieldLink never touches your funds.'],
   ];
   return (
     <section className="lp-section" id="features">
@@ -955,9 +955,9 @@ const LandingFeatures: React.FC = () => {
 
 const LandingPrivacyDeepDive: React.FC = () => {
   const points = [
-    ['Tongo key never leaves your browser', "The one-time Tongo private key is generated and used entirely client-side. It's never transmitted or saved — only embedded in the URL fragment."],
-    ['Sender and receiver are on-chain decoupled', 'Deposit TX: your address funds a random Tongo pubkey. Claim TX: a different address withdraws — these two events share no common field.'],
-    ['Amounts are ElGamal-encrypted', 'Tongo uses ElGamal encryption on the Starknet curve. Balances are stored as cipher tuples (L, R) — only the account owner can decrypt them.'],
+    ['Your key never leaves your browser', "A unique key is created in your browser and embedded in the link. It is never stored on any server — only you and the recipient ever see it."],
+    ['Sender and receiver are completely separated', 'Sending and receiving happen as two independent events on-chain. Nothing connects them — no shared address, no common data.'],
+    ['Amounts are fully encrypted', 'Balances are stored in encrypted form on-chain. Only the account owner can read them — the blockchain stores nothing readable to anyone else.'],
   ];
   return (
     <section className="lp-section" id="privacy" style={{ background: 'var(--bg-1)' }}>
@@ -1023,16 +1023,16 @@ const LandingCtaBand: React.FC<LandingProp> = ({ onLaunchApp }) => {
 
 const LandingFooter: React.FC<LandingProp> = ({ onLaunchApp }) => {
   const cols = [
-    ['Product', ['Shield', 'Send a link', 'Claim', 'Unshield']],
+    ['Product', ['Send privately', 'Payment link', 'Claim', 'Withdraw']],
     ['Resources', ['Documentation', 'How it works', 'Audits', 'Status']],
     ['Project', ['GitHub', 'Whitepaper', 'Community', 'Terms']],
   ] as const;
 
   const handleLinkClick = (e: React.MouseEvent, link: string) => {
-    if (['Shield', 'Send a link', 'Claim', 'Unshield'].includes(link)) {
+    if (['Send privately', 'Payment link', 'Claim', 'Withdraw'].includes(link)) {
       e.preventDefault();
-      const targetView = link === 'Shield' ? 'shield' 
-                       : link === 'Send a link' ? 'send'
+      const targetView = link === 'Send privately' ? 'shield'
+                       : link === 'Payment link' ? 'send'
                        : link === 'Claim' ? 'claim'
                        : 'unshield';
       onLaunchApp(targetView);
@@ -1046,7 +1046,7 @@ const LandingFooter: React.FC<LandingProp> = ({ onLaunchApp }) => {
           <div>
             <Logo />
             <p className="sl-muted" style={{ fontSize: 13.5, lineHeight: 1.6, marginTop: 14, maxWidth: 280 }}>
-              Transactional privacy for everyday assets on Starknet.
+              Private payments for everyday assets on Starknet.
             </p>
             <span className="sl-chip" style={{ marginTop: 16 }}><span className="sl-dot sl-dot-mint sl-live" /> Starknet · L2 live</span>
           </div>
@@ -1127,7 +1127,7 @@ const WalletModalContent: React.FC<WalletModalContentProps> = ({
             {realWalletAddress}
           </div>
           <div className="sl-between" style={{ fontSize: 12, marginTop: 4 }}>
-            <span>STRK20 (shielded): <strong className="sl-mono">{realWalletBalances.strk.toFixed(4)}</strong></span>
+            <span>STRK balance: <strong className="sl-mono">{realWalletBalances.strk.toFixed(4)}</strong></span>
           </div>
         </div>
       ) : (
@@ -1221,7 +1221,7 @@ function App() {
 
   // Stub — the actual Tongo withdraw flow is in cancelShieldLink (ragequit)
   const unshieldTokens = async (_amount: number, _token: 'STRK' | 'USDC') => {
-    alert('Use the Cancel button on a payment link to trigger a Tongo ragequit and return funds on-chain.');
+    alert('Use the Cancel button on a payment link to withdraw your funds back to your wallet.');
   };
 
   // P2P modal state
@@ -1428,7 +1428,7 @@ function App() {
     if (isNaN(amt) || amt <= 0) return;
     const currentShielded = unshieldToken === 'STRK' ? activeWallet.shieldedStrk : activeWallet.shieldedUsdc;
     if (amt > currentShielded) {
-      alert(`Insufficient shielded ${unshieldToken} balance.`);
+      alert(`Insufficient ${unshieldToken} balance.`);
       return;
     }
 
@@ -1594,7 +1594,7 @@ function App() {
                           This payment link has already been claimed and can no longer be used.
                         </span>
                       </div>
-                      <Amount value={claimLinkData.amount} unit={claimLinkData.token === 'STRK' ? 'STRK20' : 'USDC20'} size={32} tone="mint" />
+                      <Amount value={claimLinkData.amount} unit={claimLinkData.token} size={32} tone="mint" />
                       <button className="sl-btn" style={{ width: '100%', height: 44, background: 'var(--bg-3)' }} onClick={() => navigateWithTransition('landing', 'backward')}>
                         Back to Home
                       </button>
@@ -1646,14 +1646,14 @@ function App() {
               )}
 
               <div className="sl-row" style={{ gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-                {[['lock', 'Key never left your browser'], ['shield', 'Untraceable to the sender'], ['check', 'Settles in seconds']].map(([ic, t]) => (
+                {[['lock', 'Key never left your browser'], ['shield', 'Sender cannot be traced'], ['check', 'Settles in seconds']].map(([ic, t]) => (
                   <span key={t} className="sl-chip" style={{ height: 30 }}><Icon name={ic} size={13} style={{ color: 'var(--mint)' }} /> {t}</span>
                 ))}
               </div>
             </div>
           </div>
 
-          <span className="sl-tiny sl-dim" style={{ marginTop: 26 }}>Secured on Starknet · ShieldLink never sees who you are</span>
+          <span className="sl-tiny sl-dim" style={{ marginTop: 26 }}>Built on Starknet · ShieldLink never sees who you are</span>
         </div>
 
         {/* WALLET CONNECTOR & NETWORK SETTINGS MODAL */}
@@ -1719,9 +1719,9 @@ function App() {
         active={view}
         title={view === 'dashboard' ? 'Dashboard' : view === 'send' ? 'Send a payment' : 'Activity & Links'}
         subtitle={
-          view === 'dashboard' ? 'Your shielded balance and recent activity' :
+          view === 'dashboard' ? 'Your balance and recent payments' :
           view === 'send' ? 'Create a private, one-time payment link' :
-          'Manage your generated links and L2 logs'
+          'Manage your payment links and history'
         }
         isConnected={isConnected}
         isReconnecting={isReconnecting}
@@ -1744,7 +1744,7 @@ function App() {
                   <Icon name="eye" size={16} style={{ color: 'var(--amber)' }} />
                   <div className="sl-col" style={{ gap: 2 }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>No wallet connected</span>
-                    <span className="sl-tiny sl-dim">Connect Argent X, Braavos, or login with Privy to get started.</span>
+                    <span className="sl-tiny sl-dim">Connect your wallet to send and receive privately.</span>
                   </div>
                 </div>
                 <button className="sl-btn sl-btn-primary sl-btn-sm" style={{ background: 'var(--amber)', color: '#000', borderColor: 'var(--amber)', fontSize: 12, fontWeight: 600 }} onClick={() => setWalletModalOpen(true)}>Connect Wallet</button>
@@ -1919,7 +1919,7 @@ function App() {
                     <Icon name="claim" size={15} style={{ color: 'var(--mint)' }} />
                     <div className="sl-col" style={{ gap: 1 }}>
                       <span className="sl-eyebrow" style={{ color: 'var(--mint-2)' }}>Incoming Transfers</span>
-                      <span className="sl-tiny sl-muted">Someone sent funds to your address through the private pool — claim them to your wallet.</span>
+                      <span className="sl-tiny sl-muted">Someone sent you money privately — add it to your wallet.</span>
                     </div>
                   </div>
                 </div>
@@ -1938,10 +1938,10 @@ function App() {
                             </span>
                           </div>
                           <span className="sl-tiny sl-muted">
-                            Deposited into private pool · {transfer.timestamp}
+                            Sent privately · {transfer.timestamp}
                           </span>
                           <span className="sl-tiny" style={{ color: 'var(--text-3)', fontFamily: 'var(--mono)', fontSize: 10 }}>
-                            Sender address is hidden — this is a private transfer
+                            Sender is not visible — this is a private transfer
                           </span>
                         </div>
 
@@ -2001,12 +2001,12 @@ function App() {
                       : 'send';
 
                     const label = ({
-                      'Shield':            'Shielded deposit',
-                      'Unshield':          'Withdrawn (ragequit)',
-                      'Claim via Relayer': 'Claimed from link',
-                      'Deposit to Link':   'Payment link sent',
-                      'P2P Send':          'P2P transfer sent',
-                      'P2P Receive':       'P2P transfer received',
+                      'Shield':            'Private deposit',
+                      'Unshield':          'Withdrawn',
+                      'Claim via Relayer': 'Received from link',
+                      'Deposit to Link':   'Payment sent',
+                      'P2P Send':          'Private transfer sent',
+                      'P2P Receive':       'Private transfer received',
                     } as Record<string, string>)[entry.type] ?? entry.type;
 
                     const typeTag = isIncoming ? { label: 'Credit', bg: 'var(--mint-bg)', color: 'var(--mint)' }
@@ -2080,15 +2080,15 @@ function App() {
                 <div className="sl-card sl-col" style={{ width: 420, maxWidth: '95vw', padding: 24, gap: 18, background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 16 }}>
                   <div className="sl-between">
                     <div className="sl-col" style={{ gap: 3 }}>
-                      <span style={{ fontSize: 16, fontWeight: 700 }}>P2P Private Transfer</span>
-                      <span className="sl-tiny sl-muted">Funds route through Tongo — sender &amp; recipient never linked on-chain.</span>
+                      <span style={{ fontSize: 16, fontWeight: 700 }}>Send to Someone</span>
+                      <span className="sl-tiny sl-muted">Send privately — your address and the recipient's are never connected.</span>
                     </div>
                     <button onClick={() => setP2pModalOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-2)', fontSize: 22, cursor: 'pointer' }}>&times;</button>
                   </div>
 
                   <div className="sl-col" style={{ gap: 12 }}>
                     <div className="sl-col" style={{ gap: 5 }}>
-                      <label className="sl-label">Recipient Starknet address</label>
+                      <label className="sl-label">Recipient's wallet address</label>
                       <input className="sl-input" style={{ fontFamily: 'var(--mono)', fontSize: 12 }} placeholder="0x…" value={p2pRecipient} onChange={e => setP2pRecipient(e.target.value)} />
                     </div>
 
@@ -2120,7 +2120,7 @@ function App() {
 
                     <div style={{ padding: '10px 12px', background: 'rgba(52,211,153,0.05)', border: '1px solid var(--mint-line)', borderRadius: 8 }}>
                       <span className="sl-tiny" style={{ color: 'var(--mint-2)', lineHeight: 1.5 }}>
-                        Funds are deposited into Tongo now. You can release them to the recipient at any time — wait 10+ min for maximum privacy.
+                        Funds are sent privately. The recipient will see this and can claim it to their wallet. Waiting a few minutes before they claim gives the best privacy.
                       </span>
                     </div>
                   </div>
@@ -2144,7 +2144,7 @@ function App() {
                       setP2pSending(false);
                     }}
                   >
-                    {p2pSending ? 'Sending to Tongo pool…' : 'Deposit to Tongo →'}
+                    {p2pSending ? 'Sending…' : 'Send privately →'}
                   </button>
                 </div>
               </div>
@@ -2164,9 +2164,9 @@ function App() {
                   <Icon name="shield" size={20} />
                 </div>
                 <div className="sl-col" style={{ gap: 4 }}>
-                  <span style={{ fontSize: 16, fontWeight: 600 }}>Powered by Tongo Privacy Pool</span>
+                  <span style={{ fontSize: 16, fontWeight: 600 }}>Your money, fully private</span>
                   <span className="sl-tiny sl-muted" style={{ lineHeight: 1.55 }}>
-                    ShieldLink uses the <strong>Tongo</strong> ElGamal privacy protocol on Starknet.
+                    ShieldLink uses a private pool on Starknet.
                     Balances are encrypted on-chain — no one can see how much you hold or who you paid.
                   </span>
                 </div>
@@ -2175,7 +2175,7 @@ function App() {
               <hr className="sl-divider" />
 
               <div className="sl-col" style={{ gap: 8 }}>
-                <span className="sl-eyebrow">Your STRK balance (available to send)</span>
+                <span className="sl-eyebrow">Your STRK balance</span>
                 <Amount value={activeWallet.shieldedStrk.toFixed(2)} unit="STRK" size={40} tone="mint" />
                 {connectionType === 'starknet' && (
                   <span className="sl-chip sl-chip-mint" style={{ alignSelf: 'flex-start', height: 24, fontSize: 11 }}>
@@ -2196,14 +2196,14 @@ function App() {
 
             {/* How it works */}
             <div className="sl-card sl-card-pad sl-col" style={{ gap: 18, background: 'var(--bg-1)' }}>
-              <span className="sl-eyebrow">How Tongo privacy works</span>
+              <span className="sl-eyebrow">How your privacy works</span>
 
               <div className="sl-col" style={{ gap: 16 }}>
                 {[
-                  { icon: 'lock', title: 'One-time link key generated', body: 'When you create a link, a random one-time Tongo private key is generated in your browser. It never touches any server.' },
-                  { icon: 'shield', title: 'Funds enter the encrypted pool', body: 'Your STRK is deposited into the Tongo privacy pool under the one-time key. Amounts are ElGamal-encrypted on-chain.' },
-                  { icon: 'send', title: 'Recipient claims privately', body: 'The URL carries the one-time key. The recipient generates a ZK proof in-browser and withdraws — no address linkage on-chain.' },
-                  { icon: 'unshield', title: 'Cancel = on-chain ragequit', body: 'Cancelling a link triggers a Tongo ragequit, returning the exact amount to your wallet with an on-chain proof.' },
+                  { icon: 'lock', title: 'A unique key is created', body: 'When you create a link, a one-time key is generated in your browser. It never touches any server.' },
+                  { icon: 'shield', title: 'Funds are secured privately', body: 'Your payment is locked into a private pool. The amount is hidden on-chain — no one can see what you sent.' },
+                  { icon: 'send', title: 'Recipient receives privately', body: 'The recipient opens the link and claims the funds. Your address and theirs are never connected on-chain.' },
+                  { icon: 'unshield', title: 'Cancel anytime, get money back', body: 'Cancel a link at any time and your funds are returned to your wallet immediately.' },
                 ].map(({ icon, title, body }) => (
                   <div key={title} className="sl-row" style={{ gap: 12, alignItems: 'flex-start' }}>
                     <div style={{ width: 30, height: 30, flex: '0 0 auto', borderRadius: 8, background: 'var(--bg-3)', color: 'var(--text-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2221,7 +2221,7 @@ function App() {
 
               <div className="sl-col" style={{ gap: 6 }}>
                 <div className="sl-between sl-tiny">
-                  <span className="sl-dim">Tongo STRK pool (Sepolia)</span>
+                  <span className="sl-dim">Contract address (Sepolia testnet)</span>
                 </div>
                 <div className="sl-mono sl-dim" style={{ fontSize: 10, wordBreak: 'break-all', padding: '6px 8px', background: 'var(--bg-0)', borderRadius: 6, border: '1px solid var(--line)' }}>
                   0x408163bfcfc2d76f34b444cb55e09dace5905cf84c0884e4637c2c0f06ab6ed
@@ -2300,7 +2300,7 @@ function App() {
 
                     {/* Custom amount — splits into notes automatically */}
                     <div className="sl-col" style={{ gap: 4 }}>
-                      <span className="sl-tiny sl-dim">Or enter any amount (auto-splits into notes)</span>
+                      <span className="sl-tiny sl-dim">Or enter any amount (split automatically for better privacy)</span>
                       <input
                         type="number"
                         className="sl-input sl-mono"
@@ -2327,7 +2327,7 @@ function App() {
                         <div className="sl-row" style={{ gap: 6, marginBottom: 6 }}>
                           <Icon name="lock" size={13} style={{ color: 'var(--mint)' }} />
                           <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--mint)' }}>
-                            {notes.length === 1 ? '1 private note' : `${notes.length} private notes`}
+                            {notes.length === 1 ? '1 part' : `${notes.length} parts`}
                           </span>
                           {!isExact && <span className="sl-tiny sl-dim" style={{ marginLeft: 'auto' }}>auto-split</span>}
                         </div>
@@ -2339,7 +2339,7 @@ function App() {
                           ))}
                         </div>
                         <div className="sl-tiny sl-muted" style={{ marginTop: 6, lineHeight: 1.4 }}>
-                          Each note enters the Tongo pool independently — same denomination, indistinguishable from hundreds of other deposits.
+                          Each part is sent independently — the same size as hundreds of other payments, making yours impossible to single out.
                         </div>
                       </div>
                     );
@@ -2422,7 +2422,7 @@ function App() {
                         const noteCount = found?.notes?.length ?? 1;
                         return (
                           <span className="sl-tiny sl-dim">
-                            {noteCount === 1 ? '1 private note' : `${noteCount} private notes`} · scan or share URL
+                            {noteCount === 1 ? '1 part' : `${noteCount} parts`} · scan or share link
                           </span>
                         );
                       })()}
@@ -2441,7 +2441,7 @@ function App() {
                         <div style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--bg-3)', border: '1px solid var(--line)' }}>
                           <div className="sl-row" style={{ gap: 6, marginBottom: 4 }}>
                             <Icon name="shield" size={12} style={{ color: 'var(--mint)' }} />
-                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--mint)' }}>{found.notes.length} fixed-denomination notes</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--mint)' }}>Sent in {found.notes.length} parts</span>
                           </div>
                           <div className="sl-row" style={{ gap: 5, flexWrap: 'wrap' }}>
                             {unique.map(d => (
@@ -2474,12 +2474,12 @@ function App() {
 
                     {/* Privacy properties */}
                     <div style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--bg-1)', border: '1px solid var(--line)' }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', display: 'block', marginBottom: 8 }}>Privacy properties</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', display: 'block', marginBottom: 8 }}>What makes this private</span>
                       {[
-                        ['check', 'Fixed denomination — amount invisible on-chain'],
-                        ['check', 'One-time key — never reused, never stored server-side'],
-                        ['check', 'Tongo pool — your note is indistinguishable from others'],
-                        ['check', 'Zero address link — sender ↔ recipient unlinkable'],
+                        ['check', 'Amount hidden from public view'],
+                        ['check', 'One-time link — never reused, never stored'],
+                        ['check', 'Your payment blends with hundreds of others'],
+                        ['check', 'Sender and recipient are never connected'],
                       ].map(([ic, txt]) => (
                         <div key={txt} className="sl-row" style={{ gap: 7, marginBottom: 5 }}>
                           <Icon name={ic} size={12} style={{ color: 'var(--mint)', flex: '0 0 auto' }} sw={2.5} />
@@ -2500,7 +2500,7 @@ function App() {
                 <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', padding: 40, textAlign: 'center', gap: 10 }}>
                   <Icon name="link" size={36} style={{ opacity: 0.3 }} />
                   <span className="sl-label">Compose a payment link</span>
-                  <p className="sl-tiny sl-muted" style={{ maxWidth: 260 }}>Once you compile the proof and generate the transfer, the private claim key details will appear here.</p>
+                  <p className="sl-tiny sl-muted" style={{ maxWidth: 260 }}>Fill in the details on the left and your shareable payment link will appear here.</p>
                 </div>
               )}
             </div>
@@ -2527,13 +2527,13 @@ function App() {
                 <form onSubmit={handleUnshieldSubmit} className="sl-col" style={{ gap: 18, height: '100%' }}>
                   <div className="sl-col" style={{ gap: 9 }}>
                     <div className="sl-between">
-                      <span className="sl-label">Amount to unshield</span>
+                      <span className="sl-label">Amount to withdraw</span>
                       <span className="sl-tiny sl-dim">
-                        Shielded balance:{' '}
+                        Available:{' '}
                         <span className="sl-mono" style={{ color: 'var(--mint)', fontWeight: 600 }}>
                           {unshieldToken === 'STRK' ? activeWallet.shieldedStrk.toFixed(2) : activeWallet.shieldedUsdc.toFixed(2)}
                         </span>{' '}
-                        {unshieldToken}20
+                        {unshieldToken}
                       </span>
                     </div>
 
@@ -2557,8 +2557,8 @@ function App() {
                         onChange={(e) => setUnshieldToken(e.target.value as 'STRK' | 'USDC')}
                         style={{ background: 'transparent', border: 'none', color: 'var(--text)', fontWeight: 600, outline: 'none', cursor: 'pointer' }}
                       >
-                        <option value="STRK" style={{ background: 'var(--bg-3)' }}>STRK20</option>
-                        <option value="USDC" style={{ background: 'var(--bg-3)' }}>USDC20</option>
+                        <option value="STRK" style={{ background: 'var(--bg-3)' }}>STRK</option>
+                        <option value="USDC" style={{ background: 'var(--bg-3)' }}>USDC</option>
                       </select>
                       <button
                         type="button"
@@ -2574,10 +2574,10 @@ function App() {
                   {/* conversion preview */}
                   <div className="sl-row" style={{ gap: 12, justifyContent: 'center', padding: '2px 0' }}>
                     <div className="sl-col" style={{ alignItems: 'center', gap: 6, flex: 1 }}>
-                      <span className="sl-eyebrow" style={{ color: 'var(--mint-2)' }}>From · shielded</span>
+                      <span className="sl-eyebrow" style={{ color: 'var(--mint-2)' }}>From · private</span>
                       <div className="sl-card sl-row" style={{ width: '100%', justifyContent: 'center', gap: 7, padding: '10px 0', background: 'var(--mint-bg)', borderColor: 'var(--mint-line)' }}>
                         <Icon name="lock" size={14} style={{ color: 'var(--mint)' }} />
-                        <span className="sl-mono" style={{ fontWeight: 600, color: 'var(--mint)', fontSize: 13.5 }}>{parseFloat(unshieldAmount) || 0} {unshieldToken}20</span>
+                        <span className="sl-mono" style={{ fontWeight: 600, color: 'var(--mint)', fontSize: 13.5 }}>{parseFloat(unshieldAmount) || 0} {unshieldToken}</span>
                       </div>
                     </div>
                     <Icon name="arrowRight" size={18} style={{ color: 'var(--text-3)', marginTop: 22 }} />
@@ -2608,7 +2608,7 @@ function App() {
 
                   <div className="sl-grow" />
                   <button type="submit" className="sl-btn sl-btn-primary" style={{ height: 48 }} disabled={(parseFloat(unshieldAmount) || 0) > (unshieldToken === 'STRK' ? activeWallet.shieldedStrk : activeWallet.shieldedUsdc)}>
-                    <Icon name="unshield" size={16} /> Unshield to Public Address
+                    <Icon name="unshield" size={16} /> Withdraw to Wallet
                   </button>
                 </form>
               )}
@@ -2620,36 +2620,36 @@ function App() {
               <div className="sl-card sl-card-pad sl-row" style={{ gap: 12, alignItems: 'flex-start', background: 'var(--amber-bg)', borderColor: 'var(--amber-line)' }}>
                 <Icon name="eye" size={18} style={{ color: 'var(--amber)', flex: '0 0 auto', marginTop: 2 }} />
                 <div className="sl-col" style={{ gap: 4 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--amber)' }}>This amount becomes public</span>
-                  <span className="sl-tiny sl-muted" style={{ lineHeight: 1.45 }}>Once unshielded, the destination balance and details are visible on-chain like normal transfers. The link to your private shielded history stays hidden.</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--amber)' }}>This will be visible on-chain</span>
+                  <span className="sl-tiny sl-muted" style={{ lineHeight: 1.45 }}>Once withdrawn, the destination balance and details are visible on-chain like any normal transfer. Your private payment history stays hidden.</span>
                 </div>
               </div>
 
               <div className="sl-card sl-card-pad sl-col" style={{ gap: 16, background: 'var(--bg-1)', flexGrow: 1 }}>
-                <span className="sl-eyebrow">Protect your privacy</span>
+                <span className="sl-eyebrow">Tips for better privacy</span>
                 
                 <div className="sl-col" style={{ gap: 14 }}>
                   <div className="sl-row" style={{ gap: 12, alignItems: 'flex-start' }}>
                     <div style={{ width: 30, height: 30, flex: '0 0 auto', borderRadius: 8, background: 'var(--bg-3)', color: 'var(--text-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="shield" size={15} /></div>
                     <div className="sl-col" style={{ gap: 2 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 600 }}>Use a fresh address</span>
-                      <span className="sl-tiny sl-muted" style={{ lineHeight: 1.4 }}>Withdrawing assets to a brand-new address keeps it unconnected to your identity.</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 600 }}>Use a fresh wallet address</span>
+                      <span className="sl-tiny sl-muted" style={{ lineHeight: 1.4 }}>Withdrawing to a new address keeps it unconnected to any history.</span>
                     </div>
                   </div>
 
                   <div className="sl-row" style={{ gap: 12, alignItems: 'flex-start' }}>
                     <div style={{ width: 30, height: 30, flex: '0 0 auto', borderRadius: 8, background: 'var(--bg-3)', color: 'var(--text-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="refresh" size={15} /></div>
                     <div className="sl-col" style={{ gap: 2 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 600 }}>Vary the amount & timing</span>
-                      <span className="sl-tiny sl-muted" style={{ lineHeight: 1.4 }}>Identical round numbers or repeated timings are easier to correlate. Mix up your withdrawals.</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 600 }}>Mix up the amount and timing</span>
+                      <span className="sl-tiny sl-muted" style={{ lineHeight: 1.4 }}>Repeating the same exact amount or timing makes patterns easier to spot. Vary your withdrawals.</span>
                     </div>
                   </div>
 
                   <div className="sl-row" style={{ gap: 12, alignItems: 'flex-start' }}>
                     <div style={{ width: 30, height: 30, flex: '0 0 auto', borderRadius: 8, background: 'var(--bg-3)', color: 'var(--text-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="lock" size={15} /></div>
                     <div className="sl-col" style={{ gap: 2 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 600 }}>Keep the rest shielded</span>
-                      <span className="sl-tiny sl-muted" style={{ lineHeight: 1.4 }}>Only withdraw what you need to spend publicly right now. Keep assets private by default.</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 600 }}>Keep the rest private</span>
+                      <span className="sl-tiny sl-muted" style={{ lineHeight: 1.4 }}>Only withdraw what you need right now. Keep the rest private by default.</span>
                     </div>
                   </div>
                 </div>
@@ -2671,7 +2671,7 @@ function App() {
             
             {/* Generated Links Manager */}
             <div className="sl-card sl-card-pad sl-col" style={{ gap: 14 }}>
-              <span className="sl-eyebrow">Your generated private payment links</span>
+              <span className="sl-eyebrow">Your payment links</span>
               
               <div className="sl-col" style={{ gap: 10 }}>
                 {links.map((link) => (
@@ -2692,7 +2692,7 @@ function App() {
                       )}
 
                       <div className="sl-mono sl-dim" style={{ fontSize: 10, wordBreak: 'break-all' }}>
-                        Key: {link.secretKey}
+                        Ref: {link.secretKey.slice(0, 16)}…
                       </div>
                     </div>
 
@@ -2724,7 +2724,7 @@ function App() {
             {/* Complete Public L2 Logs */}
             <div className="sl-card sl-card-pad sl-col" style={{ gap: 14 }}>
               <div className="sl-between">
-                <span className="sl-eyebrow">Public Starknet Ledger (L2 logs)</span>
+                <span className="sl-eyebrow">Transaction History</span>
                 <span className="sl-chip sl-chip-mint" style={{ height: 22, fontSize: 10 }}><span className="sl-dot sl-dot-mint sl-live" /> synced</span>
               </div>
 
@@ -2735,14 +2735,14 @@ function App() {
                     <div key={entry.id} className="sl-card sl-row" style={{ padding: '12px 16px', background: 'var(--bg-3)', fontSize: 13, gap: 16 }}>
                       <div className="sl-col" style={{ flex: '0 0 130px' }}>
                         <span style={{ fontWeight: 600 }}>
-                          {entry.type === 'Shield' ? 'Shield deposit' : entry.type === 'Unshield' ? 'Unshield withdrawal' : entry.type === 'Claim via Relayer' ? 'Claim relayer' : 'Link deposit'}
+                          {entry.type === 'Shield' ? 'Private deposit' : entry.type === 'Unshield' ? 'Withdrawal' : entry.type === 'Claim via Relayer' ? 'Payment claimed' : 'Payment sent'}
                         </span>
                         <span className="sl-tiny sl-dim">{entry.timestamp}</span>
                       </div>
                       
                       <div className="sl-col sl-grow" style={{ gap: 2 }}>
                         <span className="sl-mono sl-dim" style={{ fontSize: 11 }}>Tx: {entry.txHash.substring(0, 16)}…{entry.txHash.substring(entry.txHash.length - 8)}</span>
-                        <span className="sl-mono sl-dim" style={{ fontSize: 10, opacity: 0.7 }}>Actor: {entry.address.substring(0, 10)}…{entry.address.substring(entry.address.length - 6)}</span>
+                        <span className="sl-mono sl-dim" style={{ fontSize: 10, opacity: 0.7 }}>Address: {entry.address.substring(0, 10)}…{entry.address.substring(entry.address.length - 6)}</span>
                       </div>
 
                       <span className="sl-chip" style={{ height: 22, fontSize: 10 }}>{entry.token}</span>
