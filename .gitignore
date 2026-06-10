@@ -1,0 +1,36 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Cairo build artifacts
+contracts/target/
+
+# Deployer sensitive files
+deployer/keystore/
+deployer/deployer_account.json
+deployer/env.sh
+
+# Extracted assets (large binaries)
+extracted_branding/
+extracted_landing/
