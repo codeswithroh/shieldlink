@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import QRCodeSVG from 'react-qr-code';
 import { useStarknetState, type MockWallet, type ShieldLinkData, type NoteEntry, FIXED_DENOMS, splitIntoNotes } from './hooks/useStarknetState';
 import { getOrg, saveOrg, getRecipients, saveRecipient, deleteRecipient,
-         type OrgRecord, type RecipientRecord } from './utils/db';
+         savePayRun, type OrgRecord, type RecipientRecord, type PayRunRecord } from './utils/db';
 
 // ─────────────────────────────────────────────────────────────
 // Icons Definition
@@ -1178,12 +1178,22 @@ const WalletModalContent: React.FC<WalletModalContentProps> = ({
 // ─────────────────────────────────────────────────────────────
 // PAYROLL VIEW — Phase 1
 // ─────────────────────────────────────────────────────────────
-const PayrollView: React.FC<{ walletAddress: string }> = ({ walletAddress }) => {
-  const [org, setOrg] = useState<OrgRecord | null | undefined>(undefined); // undefined = loading
+type CreateShieldLinkFn = (
+  amount: number,
+  token: 'STRK' | 'USDC',
+  note?: string,
+  p2pOptions?: { recipientAddress: string },
+) => Promise<ShieldLinkData>;
+
+const PayrollView: React.FC<{
+  walletAddress: string;
+  createShieldLink: CreateShieldLinkFn;
+  walletBalance: { strk: number; usdc: number };
+}> = ({ walletAddress, createShieldLink, walletBalance }) => {
+  const [org, setOrg] = useState<OrgRecord | null | undefined>(undefined);
   const [orgNameInput, setOrgNameInput] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Load org for this wallet on mount
   useEffect(() => {
     if (!walletAddress) { setOrg(null); return; }
     getOrg(walletAddress).then(o => setOrg(o ?? null));
@@ -1217,7 +1227,6 @@ const PayrollView: React.FC<{ walletAddress: string }> = ({ walletAddress }) => 
     return <div className="sl-col" style={{ alignItems: 'center', padding: 40 }}><div className="spinner" /></div>;
   }
 
-  // ── No org yet: onboarding screen ──
   if (org === null) {
     return (
       <div className="sl-col" style={{ gap: 24, maxWidth: 520 }}>
@@ -1225,7 +1234,6 @@ const PayrollView: React.FC<{ walletAddress: string }> = ({ walletAddress }) => 
           <span style={{ fontWeight: 700, fontSize: 17, letterSpacing: '-0.02em' }}>Set up your organization</span>
           <span style={{ color: 'var(--text-3)', fontSize: 13.5 }}>Give your org a name. You'll add team members next.</span>
         </div>
-
         <div className="sl-card sl-card-pad sl-col" style={{ gap: 16 }}>
           <div className="sl-col" style={{ gap: 6 }}>
             <label className="sl-eyebrow" htmlFor="org-name-input">Organization name</label>
@@ -1253,14 +1261,25 @@ const PayrollView: React.FC<{ walletAddress: string }> = ({ walletAddress }) => 
     );
   }
 
-  // ── Org exists: show roster ──
-  return <PayrollRoster org={org} />;
+  return (
+    <PayrollRoster
+      org={org}
+      createShieldLink={createShieldLink}
+      walletBalance={walletBalance}
+    />
+  );
 };
 
 // ─────────────────────────────────────────────────────────────
-// PAYROLL ROSTER — manage recipients for an org
+// PAYROLL ROSTER — manage recipients + run payroll
 // ─────────────────────────────────────────────────────────────
-const PayrollRoster: React.FC<{ org: OrgRecord }> = ({ org }) => {
+type RunStatus = { recipientId: string; label: string; state: 'pending' | 'sending' | 'done' | 'failed'; txHash?: string; error?: string };
+
+const PayrollRoster: React.FC<{
+  org: OrgRecord;
+  createShieldLink: CreateShieldLinkFn;
+  walletBalance: { strk: number; usdc: number };
+}> = ({ org, createShieldLink, walletBalance }) => {
   const [recipients, setRecipients] = useState<RecipientRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [labelInput, setLabelInput] = useState('');
@@ -1268,21 +1287,25 @@ const PayrollRoster: React.FC<{ org: OrgRecord }> = ({ org }) => {
   const [addError, setAddError] = useState('');
   const [adding, setAdding] = useState(false);
 
-  const reload = () => getRecipients(org.id).then(r => { setRecipients(r); setLoading(false); });
+  // Pay run state
+  const [payToken, setPayToken] = useState<'STRK' | 'USDC'>('STRK');
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [runStatuses, setRunStatuses] = useState<RunStatus[] | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [runDone, setRunDone] = useState(false);
 
+  const reload = () => getRecipients(org.id).then(r => { setRecipients(r); setLoading(false); });
   useEffect(() => { reload(); }, [org.id]);
 
   const handleAdd = async () => {
     const label = labelInput.trim();
     const addr = addressInput.trim();
     setAddError('');
-
     if (!label) { setAddError('Enter a name or label.'); return; }
     if (!addr.startsWith('0x') || addr.length < 10) { setAddError('Enter a valid Starknet wallet address.'); return; }
     if (recipients.some(r => r.walletAddress.toLowerCase() === addr.toLowerCase())) {
       setAddError('This address is already in the roster.'); return;
     }
-
     setAdding(true);
     const rec: RecipientRecord = {
       id: `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -1300,7 +1323,78 @@ const PayrollRoster: React.FC<{ org: OrgRecord }> = ({ org }) => {
 
   const handleRemove = async (id: string) => {
     await deleteRecipient(id);
+    setAmounts(prev => { const next = { ...prev }; delete next[id]; return next; });
     await reload();
+  };
+
+  const payableRows = recipients.filter(r => {
+    const v = parseFloat(amounts[r.id] || '0');
+    return v > 0;
+  });
+
+  const totalAmount = payableRows.reduce((s, r) => s + (parseFloat(amounts[r.id]) || 0), 0);
+  const available = payToken === 'STRK' ? walletBalance.strk : walletBalance.usdc;
+  const canRun = payableRows.length > 0 && totalAmount > 0 && totalAmount <= available && !isRunning;
+
+  const handleRunPayroll = async () => {
+    if (!canRun) return;
+    setIsRunning(true);
+    setRunDone(false);
+
+    const initialStatuses: RunStatus[] = payableRows.map(r => ({
+      recipientId: r.id,
+      label: r.label,
+      state: 'pending',
+    }));
+    setRunStatuses(initialStatuses);
+
+    const txHashes: string[] = [];
+    const runRecipients: PayRunRecord['recipients'] = [];
+
+    for (let i = 0; i < payableRows.length; i++) {
+      const r = payableRows[i];
+      const amount = parseFloat(amounts[r.id]);
+
+      // Mark as sending
+      setRunStatuses(prev => prev!.map((s, idx) => idx === i ? { ...s, state: 'sending' } : s));
+
+      try {
+        const link = await createShieldLink(
+          amount,
+          payToken,
+          `Payroll — ${org.name}`,
+          { recipientAddress: r.walletAddress },
+        );
+        txHashes.push(link.id);
+        runRecipients.push({ recipientId: r.id, walletAddress: r.walletAddress, label: r.label, amount });
+        setRunStatuses(prev => prev!.map((s, idx) => idx === i ? { ...s, state: 'done', txHash: link.id } : s));
+      } catch (err: any) {
+        setRunStatuses(prev => prev!.map((s, idx) => idx === i ? { ...s, state: 'failed', error: err?.message || 'Transaction failed' } : s));
+      }
+    }
+
+    // Persist pay run record
+    const run: PayRunRecord = {
+      id: `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      orgId: org.id,
+      ownerAddress: org.ownerAddress,
+      token: payToken,
+      recipients: runRecipients,
+      totalAmount,
+      status: 'done',
+      createdAtMs: Date.now(),
+      completedAtMs: Date.now(),
+      txHashes,
+    };
+    await savePayRun(run);
+    setIsRunning(false);
+    setRunDone(true);
+  };
+
+  const resetRun = () => {
+    setRunStatuses(null);
+    setRunDone(false);
+    setAmounts({});
   };
 
   return (
@@ -1320,79 +1414,178 @@ const PayrollRoster: React.FC<{ org: OrgRecord }> = ({ org }) => {
         </div>
       </div>
 
-      {/* Add recipient form */}
-      <div className="sl-card sl-card-pad sl-col" style={{ gap: 14 }}>
-        <span className="sl-eyebrow">Add team member</span>
-        <div className="sl-row" style={{ gap: 10, flexWrap: 'wrap' }}>
-          <input
-            className="sl-input"
-            placeholder="Name or label"
-            value={labelInput}
-            onChange={e => setLabelInput(e.target.value)}
-            style={{ flex: '1 1 160px', minWidth: 140 }}
-            maxLength={60}
-          />
-          <input
-            className="sl-input sl-mono"
-            placeholder="0x… wallet address"
-            value={addressInput}
-            onChange={e => setAddressInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAdd()}
-            style={{ flex: '2 1 260px', minWidth: 200, fontSize: 12 }}
-          />
-          <button
-            className="sl-btn sl-btn-primary"
-            onClick={handleAdd}
-            disabled={adding}
-            style={{ flexShrink: 0 }}
-          >
-            {adding ? 'Adding…' : 'Add'}
-          </button>
-        </div>
-        {addError && <span style={{ fontSize: 12, color: '#e05c5c' }}>{addError}</span>}
-      </div>
-
-      {/* Roster table */}
-      <div className="sl-card sl-card-pad sl-col" style={{ gap: 10 }}>
-        <div className="sl-between">
-          <span className="sl-eyebrow">Team roster</span>
-          <span className="sl-chip" style={{ height: 22, fontSize: 10 }}>{recipients.length} members</span>
-        </div>
-
-        {loading && <div className="sl-col" style={{ alignItems: 'center', padding: 24 }}><div className="spinner" /></div>}
-
-        {!loading && recipients.length === 0 && (
-          <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
-            No team members yet. Add someone above.
-          </div>
-        )}
-
-        {!loading && recipients.map((r, i) => (
-          <div key={r.id} className="sl-card sl-row" style={{ padding: '11px 14px', background: 'var(--bg-3)', gap: 14, alignItems: 'center' }}>
-            <div style={{
-              width: 30, height: 30, borderRadius: 8, background: 'var(--bg-4)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 12, fontWeight: 700, color: 'var(--text-2)', flexShrink: 0,
-            }}>
-              {i + 1}
-            </div>
-            <div className="sl-col sl-grow" style={{ gap: 1, overflow: 'hidden' }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600 }}>{r.label}</span>
-              <span className="sl-mono sl-dim" style={{ fontSize: 11 }}>
-                {r.walletAddress.slice(0, 10)}…{r.walletAddress.slice(-6)}
-              </span>
-            </div>
-            <button
-              className="sl-btn"
-              style={{ padding: '4px 10px', fontSize: 12, color: 'var(--text-3)', border: '1px solid var(--line)', flexShrink: 0 }}
-              onClick={() => handleRemove(r.id)}
-              title="Remove"
-            >
-              <Icon name="trash" size={14} />
+      {/* Add recipient form — hidden during an active run */}
+      {!runStatuses && (
+        <div className="sl-card sl-card-pad sl-col" style={{ gap: 14 }}>
+          <span className="sl-eyebrow">Add team member</span>
+          <div className="sl-row" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <input
+              className="sl-input"
+              placeholder="Name or label"
+              value={labelInput}
+              onChange={e => setLabelInput(e.target.value)}
+              style={{ flex: '1 1 160px', minWidth: 140 }}
+              maxLength={60}
+            />
+            <input
+              className="sl-input sl-mono"
+              placeholder="0x… wallet address"
+              value={addressInput}
+              onChange={e => setAddressInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAdd()}
+              style={{ flex: '2 1 260px', minWidth: 200, fontSize: 12 }}
+            />
+            <button className="sl-btn sl-btn-primary" onClick={handleAdd} disabled={adding} style={{ flexShrink: 0 }}>
+              {adding ? 'Adding…' : 'Add'}
             </button>
           </div>
-        ))}
-      </div>
+          {addError && <span style={{ fontSize: 12, color: '#e05c5c' }}>{addError}</span>}
+        </div>
+      )}
+
+      {/* ── ACTIVE RUN progress ── */}
+      {runStatuses && (
+        <div className="sl-card sl-card-pad sl-col" style={{ gap: 14, borderColor: 'var(--mint-line)' }}>
+          <div className="sl-between">
+            <span className="sl-eyebrow">Pay run in progress</span>
+            <span className="sl-chip sl-chip-mint" style={{ height: 22, fontSize: 10 }}>
+              {runStatuses.filter(s => s.state === 'done').length}/{runStatuses.length} sent
+            </span>
+          </div>
+          <div className="sl-col" style={{ gap: 8 }}>
+            {runStatuses.map(s => (
+              <div key={s.recipientId} className="sl-row" style={{ gap: 12, alignItems: 'center', padding: '9px 12px', borderRadius: 8, background: 'var(--bg-3)' }}>
+                <div style={{
+                  width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                  background: s.state === 'done' ? 'var(--mint-bg)' : s.state === 'failed' ? 'rgba(224,92,92,0.12)' : 'var(--bg-4)',
+                  border: `1.5px solid ${s.state === 'done' ? 'var(--mint)' : s.state === 'failed' ? '#e05c5c' : 'var(--line)'}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {s.state === 'done' && <Icon name="check" size={11} style={{ color: 'var(--mint)' }} />}
+                  {s.state === 'failed' && <Icon name="x" size={11} style={{ color: '#e05c5c' }} />}
+                  {s.state === 'sending' && <div className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} />}
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>{s.label}</span>
+                <span style={{ fontSize: 12, color: s.state === 'failed' ? '#e05c5c' : 'var(--text-3)' }}>
+                  {s.state === 'pending' ? 'Waiting…' :
+                   s.state === 'sending' ? 'Sending…' :
+                   s.state === 'done' ? `${amounts[s.recipientId] || ''} ${payToken}` :
+                   s.error || 'Failed'}
+                </span>
+              </div>
+            ))}
+          </div>
+          {runDone && (
+            <div className="sl-col" style={{ gap: 10, paddingTop: 4 }}>
+              <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--mint-bg)', border: '1px solid var(--mint-line)', fontSize: 13, color: 'var(--mint)', fontWeight: 600 }}>
+                Pay run complete — {runStatuses.filter(s => s.state === 'done').length} payments sent privately.
+              </div>
+              <button className="sl-btn" onClick={resetRun} style={{ alignSelf: 'flex-start', fontSize: 13 }}>
+                ← Start another run
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Roster + amount inputs ── */}
+      {!runStatuses && (
+        <div className="sl-card sl-card-pad sl-col" style={{ gap: 12 }}>
+          <div className="sl-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+            <span className="sl-eyebrow">Team roster</span>
+            {/* Token selector */}
+            <div className="sl-row" style={{ gap: 6 }}>
+              {(['STRK', 'USDC'] as const).map(t => (
+                <button
+                  key={t}
+                  className={'sl-btn' + (payToken === t ? ' sl-btn-primary' : '')}
+                  style={{ padding: '3px 12px', fontSize: 12, height: 26 }}
+                  onClick={() => setPayToken(t)}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {loading && <div className="sl-col" style={{ alignItems: 'center', padding: 24 }}><div className="spinner" /></div>}
+
+          {!loading && recipients.length === 0 && (
+            <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+              No team members yet. Add someone above.
+            </div>
+          )}
+
+          {!loading && recipients.map((r, i) => (
+            <div key={r.id} className="sl-card sl-row" style={{ padding: '10px 12px', background: 'var(--bg-3)', gap: 12, alignItems: 'center' }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: 7, background: 'var(--bg-4)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontWeight: 700, color: 'var(--text-2)', flexShrink: 0,
+              }}>
+                {i + 1}
+              </div>
+              <div className="sl-col sl-grow" style={{ gap: 1, overflow: 'hidden' }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{r.label}</span>
+                <span className="sl-mono sl-dim" style={{ fontSize: 10.5 }}>
+                  {r.walletAddress.slice(0, 10)}…{r.walletAddress.slice(-6)}
+                </span>
+              </div>
+              {/* Amount input */}
+              <input
+                className="sl-input sl-mono"
+                placeholder="0"
+                value={amounts[r.id] || ''}
+                onChange={e => setAmounts(prev => ({ ...prev, [r.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
+                style={{ width: 90, textAlign: 'right', fontSize: 13, padding: '5px 10px' }}
+              />
+              <span style={{ fontSize: 12, color: 'var(--text-3)', minWidth: 34 }}>{payToken}</span>
+              <button
+                className="sl-btn"
+                style={{ padding: '4px 8px', color: 'var(--text-3)', border: '1px solid var(--line)', flexShrink: 0 }}
+                onClick={() => handleRemove(r.id)}
+                disabled={isRunning}
+                title="Remove"
+              >
+                <Icon name="trash" size={13} />
+              </button>
+            </div>
+          ))}
+
+          {/* Summary + Run button */}
+          {recipients.length > 0 && (
+            <div style={{ borderTop: '1px solid var(--line)', paddingTop: 14, marginTop: 4 }}>
+              <div className="sl-between" style={{ marginBottom: 12 }}>
+                <div className="sl-col" style={{ gap: 2 }}>
+                  <span style={{ fontSize: 13, color: 'var(--text-3)' }}>
+                    {payableRows.length} of {recipients.length} recipient{recipients.length !== 1 ? 's' : ''} will receive payment
+                  </span>
+                  {totalAmount > available && (
+                    <span style={{ fontSize: 12, color: '#e05c5c' }}>
+                      Insufficient balance — you have {available.toFixed(2)} {payToken}
+                    </span>
+                  )}
+                </div>
+                <div className="sl-col" style={{ alignItems: 'flex-end', gap: 1 }}>
+                  <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.03em', color: totalAmount > available ? '#e05c5c' : 'var(--text)' }}>
+                    {totalAmount > 0 ? totalAmount.toFixed(2) : '—'} {payToken}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>total</span>
+                </div>
+              </div>
+              <button
+                className="sl-btn sl-btn-primary"
+                style={{ width: '100%', justifyContent: 'center' }}
+                disabled={!canRun}
+                onClick={handleRunPayroll}
+              >
+                <Icon name="payroll" size={15} />
+                Run payroll — {payableRows.length} payment{payableRows.length !== 1 ? 's' : ''}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -2996,7 +3189,13 @@ function App() {
         )}
 
         {/* ================= 4. PAYROLL VIEW ================= */}
-        {view === 'payroll' && <PayrollView walletAddress={realWalletAddress || ''} />}
+        {view === 'payroll' && (
+          <PayrollView
+            walletAddress={realWalletAddress || ''}
+            createShieldLink={createShieldLink}
+            walletBalance={realWalletBalances}
+          />
+        )}
 
       </AppShell>
 
