@@ -1,7 +1,36 @@
 import type { ShieldLinkData, LedgerEntry } from '../hooks/useStarknetState';
 
 const DB_NAME = 'shieldlink_v1';
-const DB_VERSION = 2; // bumped: added recipientAddress index on links
+const DB_VERSION = 3; // v3: payroll stores (orgs, recipients, payRuns)
+
+// ─── Payroll types ────────────────────────────────────────────
+export interface OrgRecord {
+  id: string;          // uuid
+  name: string;
+  ownerAddress: string;
+  createdAtMs: number;
+}
+
+export interface RecipientRecord {
+  id: string;          // uuid
+  orgId: string;
+  label: string;       // "Alice — Engineering"
+  walletAddress: string;
+  addedAtMs: number;
+}
+
+export interface PayRunRecord {
+  id: string;          // uuid
+  orgId: string;
+  ownerAddress: string;
+  token: 'STRK' | 'USDC';
+  recipients: Array<{ recipientId: string; walletAddress: string; label: string; amount: number }>;
+  totalAmount: number;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  createdAtMs: number;
+  completedAtMs?: number;
+  txHashes?: string[]; // one per recipient batch tx
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -24,6 +53,19 @@ function openDB(): Promise<IDBDatabase> {
         if (!ls.indexNames.contains('recipientAddress')) {
           ls.createIndex('recipientAddress', 'recipientAddress', { unique: false });
         }
+      }
+
+      // Version 3: payroll stores
+      if (e.oldVersion < 3) {
+        const orgs = db.createObjectStore('orgs', { keyPath: 'id' });
+        orgs.createIndex('ownerAddress', 'ownerAddress', { unique: false });
+
+        const recipients = db.createObjectStore('recipients', { keyPath: 'id' });
+        recipients.createIndex('orgId', 'orgId', { unique: false });
+
+        const payRuns = db.createObjectStore('payRuns', { keyPath: 'id' });
+        payRuns.createIndex('orgId', 'orgId', { unique: false });
+        payRuns.createIndex('ownerAddress', 'ownerAddress', { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -118,6 +160,72 @@ export async function saveLedgerEntry(entry: LedgerEntry): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction('ledger', 'readwrite');
     idbPut(tx.objectStore('ledger'), entry).then(resolve).catch(reject);
+  });
+}
+
+// ─── Payroll API ──────────────────────────────────────────────
+
+export async function getOrg(ownerAddress: string): Promise<OrgRecord | undefined> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('orgs', 'readonly');
+    idbGetByIndex<OrgRecord>(tx.objectStore('orgs'), 'ownerAddress', ownerAddress)
+      .then(rows => resolve(rows[0]))
+      .catch(reject);
+  });
+}
+
+export async function saveOrg(org: OrgRecord): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('orgs', 'readwrite');
+    idbPut(tx.objectStore('orgs'), org).then(resolve).catch(reject);
+  });
+}
+
+export async function getRecipients(orgId: string): Promise<RecipientRecord[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('recipients', 'readonly');
+    idbGetByIndex<RecipientRecord>(tx.objectStore('recipients'), 'orgId', orgId)
+      .then(rows => resolve(rows.sort((a, b) => a.addedAtMs - b.addedAtMs)))
+      .catch(reject);
+  });
+}
+
+export async function saveRecipient(r: RecipientRecord): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('recipients', 'readwrite');
+    idbPut(tx.objectStore('recipients'), r).then(resolve).catch(reject);
+  });
+}
+
+export async function deleteRecipient(id: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('recipients', 'readwrite');
+    const req = tx.objectStore('recipients').delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function getPayRuns(orgId: string): Promise<PayRunRecord[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('payRuns', 'readonly');
+    idbGetByIndex<PayRunRecord>(tx.objectStore('payRuns'), 'orgId', orgId)
+      .then(rows => resolve(rows.sort((a, b) => b.createdAtMs - a.createdAtMs)))
+      .catch(reject);
+  });
+}
+
+export async function savePayRun(run: PayRunRecord): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('payRuns', 'readwrite');
+    idbPut(tx.objectStore('payRuns'), run).then(resolve).catch(reject);
   });
 }
 

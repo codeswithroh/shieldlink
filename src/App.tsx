@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import QRCodeSVG from 'react-qr-code';
 import { useStarknetState, type MockWallet, type ShieldLinkData, type NoteEntry, FIXED_DENOMS, splitIntoNotes } from './hooks/useStarknetState';
+import { getOrg, saveOrg, getRecipients, saveRecipient, deleteRecipient,
+         type OrgRecord, type RecipientRecord } from './utils/db';
 
 // ─────────────────────────────────────────────────────────────
 // Icons Definition
@@ -26,6 +28,9 @@ const I: Record<string, React.ReactNode> = {
   settings: <g><line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.4" fill="var(--bg-1)"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.4" fill="var(--bg-1)"/></g>,
   refresh: <g><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><polyline points="20 3 20 8 15 8"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><polyline points="4 21 4 16 9 16"/></g>,
   scan: <g><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8"/><path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8"/><path d="M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16"/><path d="M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/></g>,
+  payroll: <g><rect x="4" y="4" width="16" height="4" rx="1.5"/><rect x="4" y="10" width="16" height="4" rx="1.5"/><rect x="4" y="16" width="10" height="4" rx="1.5"/></g>,
+  users: <g><circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/><circle cx="18" cy="9" r="2.5"/><path d="M22 20c0-2.5-1.8-4.5-4-4.5"/></g>,
+  trash: <g><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></g>,
 };
 
 interface IconProps {
@@ -616,7 +621,7 @@ const ClaimReadyView: React.FC<ClaimReadyViewProps> = ({
 // AppShell Layout
 // ─────────────────────────────────────────────────────────────
 interface AppShellProps {
-  active: 'dashboard' | 'shield' | 'send' | 'unshield' | 'activity' | 'claim';
+  active: 'dashboard' | 'shield' | 'send' | 'unshield' | 'activity' | 'claim' | 'payroll';
   title: string;
   subtitle?: string;
   headerRight?: React.ReactNode;
@@ -627,7 +632,7 @@ interface AppShellProps {
   openWalletModal: () => void;
   connectWallet: () => void;
   onSignOut: () => void;
-  navigate: (view: 'landing' | 'dashboard' | 'shield' | 'send' | 'unshield' | 'activity' | 'claim', dir: 'forward' | 'backward') => void;
+  navigate: (view: 'landing' | 'dashboard' | 'shield' | 'send' | 'unshield' | 'activity' | 'claim' | 'payroll', dir: 'forward' | 'backward') => void;
 }
 
 const AppShell: React.FC<AppShellProps> = ({
@@ -637,6 +642,7 @@ const AppShell: React.FC<AppShellProps> = ({
   const sidebarNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
     { id: 'send', label: 'Send', icon: 'send' },
+    { id: 'payroll', label: 'Payroll', icon: 'payroll' },
     { id: 'activity', label: 'Activity & Links', icon: 'activity' },
   ] as const;
 
@@ -1170,6 +1176,228 @@ const WalletModalContent: React.FC<WalletModalContentProps> = ({
 );
 
 // ─────────────────────────────────────────────────────────────
+// PAYROLL VIEW — Phase 1
+// ─────────────────────────────────────────────────────────────
+const PayrollView: React.FC<{ walletAddress: string }> = ({ walletAddress }) => {
+  const [org, setOrg] = useState<OrgRecord | null | undefined>(undefined); // undefined = loading
+  const [orgNameInput, setOrgNameInput] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Load org for this wallet on mount
+  useEffect(() => {
+    if (!walletAddress) { setOrg(null); return; }
+    getOrg(walletAddress).then(o => setOrg(o ?? null));
+  }, [walletAddress]);
+
+  const handleCreateOrg = async () => {
+    const name = orgNameInput.trim();
+    if (!name || !walletAddress) return;
+    setSaving(true);
+    const newOrg: OrgRecord = {
+      id: `org_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      ownerAddress: walletAddress,
+      createdAtMs: Date.now(),
+    };
+    await saveOrg(newOrg);
+    setOrg(newOrg);
+    setSaving(false);
+  };
+
+  if (!walletAddress) {
+    return (
+      <div className="sl-card sl-card-pad sl-col" style={{ alignItems: 'center', gap: 12, textAlign: 'center', padding: 40 }}>
+        <Icon name="lock" size={28} style={{ color: 'var(--text-3)' }} />
+        <span style={{ color: 'var(--text-3)', fontSize: 14 }}>Connect your wallet to access Payroll.</span>
+      </div>
+    );
+  }
+
+  if (org === undefined) {
+    return <div className="sl-col" style={{ alignItems: 'center', padding: 40 }}><div className="spinner" /></div>;
+  }
+
+  // ── No org yet: onboarding screen ──
+  if (org === null) {
+    return (
+      <div className="sl-col" style={{ gap: 24, maxWidth: 520 }}>
+        <div className="sl-col" style={{ gap: 4 }}>
+          <span style={{ fontWeight: 700, fontSize: 17, letterSpacing: '-0.02em' }}>Set up your organization</span>
+          <span style={{ color: 'var(--text-3)', fontSize: 13.5 }}>Give your org a name. You'll add team members next.</span>
+        </div>
+
+        <div className="sl-card sl-card-pad sl-col" style={{ gap: 16 }}>
+          <div className="sl-col" style={{ gap: 6 }}>
+            <label className="sl-eyebrow" htmlFor="org-name-input">Organization name</label>
+            <input
+              id="org-name-input"
+              className="sl-input"
+              placeholder="e.g. Acme Corp, My DAO"
+              value={orgNameInput}
+              onChange={e => setOrgNameInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleCreateOrg()}
+              maxLength={60}
+              autoFocus
+            />
+          </div>
+          <button
+            className="sl-btn sl-btn-primary"
+            onClick={handleCreateOrg}
+            disabled={!orgNameInput.trim() || saving}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            {saving ? 'Saving…' : 'Create organization →'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Org exists: show roster ──
+  return <PayrollRoster org={org} />;
+};
+
+// ─────────────────────────────────────────────────────────────
+// PAYROLL ROSTER — manage recipients for an org
+// ─────────────────────────────────────────────────────────────
+const PayrollRoster: React.FC<{ org: OrgRecord }> = ({ org }) => {
+  const [recipients, setRecipients] = useState<RecipientRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [labelInput, setLabelInput] = useState('');
+  const [addressInput, setAddressInput] = useState('');
+  const [addError, setAddError] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const reload = () => getRecipients(org.id).then(r => { setRecipients(r); setLoading(false); });
+
+  useEffect(() => { reload(); }, [org.id]);
+
+  const handleAdd = async () => {
+    const label = labelInput.trim();
+    const addr = addressInput.trim();
+    setAddError('');
+
+    if (!label) { setAddError('Enter a name or label.'); return; }
+    if (!addr.startsWith('0x') || addr.length < 10) { setAddError('Enter a valid Starknet wallet address.'); return; }
+    if (recipients.some(r => r.walletAddress.toLowerCase() === addr.toLowerCase())) {
+      setAddError('This address is already in the roster.'); return;
+    }
+
+    setAdding(true);
+    const rec: RecipientRecord = {
+      id: `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      orgId: org.id,
+      label,
+      walletAddress: addr,
+      addedAtMs: Date.now(),
+    };
+    await saveRecipient(rec);
+    setLabelInput('');
+    setAddressInput('');
+    await reload();
+    setAdding(false);
+  };
+
+  const handleRemove = async (id: string) => {
+    await deleteRecipient(id);
+    await reload();
+  };
+
+  return (
+    <div className="sl-col" style={{ gap: 24 }}>
+      {/* Org header */}
+      <div className="sl-row" style={{ alignItems: 'center', gap: 10 }}>
+        <div style={{
+          width: 38, height: 38, borderRadius: 10, background: 'var(--mint-bg)',
+          border: '1px solid var(--mint-line)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'var(--mint)', flexShrink: 0,
+        }}>
+          <Icon name="users" size={18} />
+        </div>
+        <div className="sl-col" style={{ gap: 1 }}>
+          <span style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em' }}>{org.name}</span>
+          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{recipients.length} team member{recipients.length !== 1 ? 's' : ''}</span>
+        </div>
+      </div>
+
+      {/* Add recipient form */}
+      <div className="sl-card sl-card-pad sl-col" style={{ gap: 14 }}>
+        <span className="sl-eyebrow">Add team member</span>
+        <div className="sl-row" style={{ gap: 10, flexWrap: 'wrap' }}>
+          <input
+            className="sl-input"
+            placeholder="Name or label"
+            value={labelInput}
+            onChange={e => setLabelInput(e.target.value)}
+            style={{ flex: '1 1 160px', minWidth: 140 }}
+            maxLength={60}
+          />
+          <input
+            className="sl-input sl-mono"
+            placeholder="0x… wallet address"
+            value={addressInput}
+            onChange={e => setAddressInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAdd()}
+            style={{ flex: '2 1 260px', minWidth: 200, fontSize: 12 }}
+          />
+          <button
+            className="sl-btn sl-btn-primary"
+            onClick={handleAdd}
+            disabled={adding}
+            style={{ flexShrink: 0 }}
+          >
+            {adding ? 'Adding…' : 'Add'}
+          </button>
+        </div>
+        {addError && <span style={{ fontSize: 12, color: '#e05c5c' }}>{addError}</span>}
+      </div>
+
+      {/* Roster table */}
+      <div className="sl-card sl-card-pad sl-col" style={{ gap: 10 }}>
+        <div className="sl-between">
+          <span className="sl-eyebrow">Team roster</span>
+          <span className="sl-chip" style={{ height: 22, fontSize: 10 }}>{recipients.length} members</span>
+        </div>
+
+        {loading && <div className="sl-col" style={{ alignItems: 'center', padding: 24 }}><div className="spinner" /></div>}
+
+        {!loading && recipients.length === 0 && (
+          <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+            No team members yet. Add someone above.
+          </div>
+        )}
+
+        {!loading && recipients.map((r, i) => (
+          <div key={r.id} className="sl-card sl-row" style={{ padding: '11px 14px', background: 'var(--bg-3)', gap: 14, alignItems: 'center' }}>
+            <div style={{
+              width: 30, height: 30, borderRadius: 8, background: 'var(--bg-4)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: 700, color: 'var(--text-2)', flexShrink: 0,
+            }}>
+              {i + 1}
+            </div>
+            <div className="sl-col sl-grow" style={{ gap: 1, overflow: 'hidden' }}>
+              <span style={{ fontSize: 13.5, fontWeight: 600 }}>{r.label}</span>
+              <span className="sl-mono sl-dim" style={{ fontSize: 11 }}>
+                {r.walletAddress.slice(0, 10)}…{r.walletAddress.slice(-6)}
+              </span>
+            </div>
+            <button
+              className="sl-btn"
+              style={{ padding: '4px 10px', fontSize: 12, color: 'var(--text-3)', border: '1px solid var(--line)', flexShrink: 0 }}
+              onClick={() => handleRemove(r.id)}
+              title="Remove"
+            >
+              <Icon name="trash" size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
 // MAIN APPLICATION COMPONENT
 // ─────────────────────────────────────────────────────────────
 function App() {
@@ -1200,8 +1428,8 @@ function App() {
     refreshBalances,
   } = useStarknetState();
 
-  // View state: 'landing' | 'dashboard' | 'shield' | 'send' | 'unshield' | 'activity' | 'claim'
-  const [view, setView] = useState<'landing' | 'dashboard' | 'shield' | 'send' | 'unshield' | 'activity' | 'claim'>('landing');
+  // View state
+  const [view, setView] = useState<'landing' | 'dashboard' | 'shield' | 'send' | 'unshield' | 'activity' | 'claim' | 'payroll'>('landing');
   const isConnected = !!realWalletAddress;
   
   // Wallet modal select dialog
@@ -1361,7 +1589,7 @@ function App() {
 
   // View Transitions SPA Navigation Helper
   const navigateWithTransition = (
-    newView: 'landing' | 'dashboard' | 'shield' | 'send' | 'unshield' | 'activity' | 'claim',
+    newView: 'landing' | 'dashboard' | 'shield' | 'send' | 'unshield' | 'activity' | 'claim' | 'payroll',
     direction: 'forward' | 'backward'
   ) => {
     if (newView === 'landing') {
@@ -1376,6 +1604,8 @@ function App() {
       window.location.hash = '#unshield';
     } else if (newView === 'activity') {
       window.location.hash = '#activity';
+    } else if (newView === 'payroll') {
+      window.location.hash = '#payroll';
     }
 
     if (!(document as any).startViewTransition) {
@@ -1717,10 +1947,16 @@ function App() {
     <div className="sl-app">
       <AppShell
         active={view}
-        title={view === 'dashboard' ? 'Dashboard' : view === 'send' ? 'Send a payment' : 'Activity & Links'}
+        title={
+          view === 'dashboard' ? 'Dashboard' :
+          view === 'send' ? 'Send a payment' :
+          view === 'payroll' ? 'Payroll' :
+          'Activity & Links'
+        }
         subtitle={
           view === 'dashboard' ? 'Your balance and recent payments' :
           view === 'send' ? 'Create a private, one-time payment link' :
+          view === 'payroll' ? 'Private disbursements for your team' :
           'Manage your payment links and history'
         }
         isConnected={isConnected}
@@ -2758,6 +2994,9 @@ function App() {
 
           </div>
         )}
+
+        {/* ================= 4. PAYROLL VIEW ================= */}
+        {view === 'payroll' && <PayrollView walletAddress={realWalletAddress || ''} />}
 
       </AppShell>
 
