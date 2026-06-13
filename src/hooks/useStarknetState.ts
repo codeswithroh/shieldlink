@@ -596,7 +596,9 @@ export function useStarknetState() {
     setLedger(prev => [claimEntry, ...prev]);
     await saveLedgerEntry(claimEntry);
 
-    setTimeout(() => refreshBalances(), 5000);
+    // Poll balance: immediately + 3s + 8s + 15s to catch Sepolia indexing lag
+    refreshBalances();
+    [3000, 8000, 15000].forEach(ms => setTimeout(() => refreshBalances(), ms));
     return claimedAny;
   };
 

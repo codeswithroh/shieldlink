@@ -1475,16 +1475,60 @@ const PayrollRoster: React.FC<{
               </div>
             ))}
           </div>
-          {runDone && (
-            <div className="sl-col" style={{ gap: 10, paddingTop: 4 }}>
-              <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--mint-bg)', border: '1px solid var(--mint-line)', fontSize: 13, color: 'var(--mint)', fontWeight: 600 }}>
-                Pay run complete — {runStatuses.filter(s => s.state === 'done').length} payments sent privately.
+          {runDone && (() => {
+            const succeeded = runStatuses!.filter(s => s.state === 'done').length;
+            const failed = runStatuses!.filter(s => s.state === 'failed').length;
+            const allOk = failed === 0;
+            return (
+              <div className="sl-col" style={{ gap: 12, paddingTop: 4 }}>
+                {/* Result banner */}
+                <div style={{
+                  padding: '16px 18px',
+                  borderRadius: 10,
+                  background: allOk ? 'var(--mint-bg)' : 'rgba(224,92,92,0.08)',
+                  border: `1px solid ${allOk ? 'var(--mint-line)' : 'rgba(224,92,92,0.3)'}`,
+                }}>
+                  <div className="sl-row" style={{ alignItems: 'center', gap: 10, marginBottom: failed > 0 ? 10 : 0 }}>
+                    <div style={{
+                      width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+                      background: allOk ? 'var(--mint-bg)' : 'rgba(224,92,92,0.12)',
+                      border: `1px solid ${allOk ? 'var(--mint)' : '#e05c5c'}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: allOk ? 'var(--mint)' : '#e05c5c',
+                    }}>
+                      <Icon name={allOk ? 'check' : 'info'} size={15} />
+                    </div>
+                    <div className="sl-col" style={{ gap: 2 }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: allOk ? 'var(--mint)' : '#e05c5c' }}>
+                        {allOk
+                          ? `Payroll complete — all ${succeeded} payment${succeeded !== 1 ? 's' : ''} sent`
+                          : `Pay run finished with ${failed} failure${failed !== 1 ? 's' : ''}`}
+                      </span>
+                      <span style={{ fontSize: 12.5, color: 'var(--text-3)' }}>
+                        {succeeded} sent privately
+                        {failed > 0 ? ` · ${failed} failed` : ''}
+                        {' · '}each recipient sees only their own amount
+                      </span>
+                    </div>
+                  </div>
+                  {/* Per-failure detail */}
+                  {failed > 0 && (
+                    <div className="sl-col" style={{ gap: 6, marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(224,92,92,0.2)' }}>
+                      {runStatuses!.filter(s => s.state === 'failed').map(s => (
+                        <div key={s.recipientId} className="sl-row" style={{ gap: 8, fontSize: 12, color: '#e05c5c', alignItems: 'flex-start' }}>
+                          <Icon name="x" size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                          <span><strong>{s.label}</strong> — {s.error || 'Transaction rejected'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button className="sl-btn" onClick={resetRun} style={{ alignSelf: 'flex-start', fontSize: 13 }}>
+                  ← Run another payroll
+                </button>
               </div>
-              <button className="sl-btn" onClick={resetRun} style={{ alignSelf: 'flex-start', fontSize: 13 }}>
-                ← Start another run
-              </button>
-            </div>
-          )}
+            );
+          })()}
         </div>
       )}
 
@@ -1654,6 +1698,9 @@ function App() {
   const [p2pSending, setP2pSending] = useState(false);
   const [p2pCopied, setP2pCopied] = useState<string | null>(null);
 
+  // Per-transfer claim state: id → 'claiming' | 'claimed' | 'failed'
+  const [transferClaimState, setTransferClaimState] = useState<Record<string, 'claiming' | 'claimed' | 'failed'>>({});
+
   // ZK-Prover running state
   const [proverState, setProverState] = useState<{
     isRunning: boolean;
@@ -1771,6 +1818,8 @@ function App() {
         setView('unshield');
       } else if (hash === '#activity') {
         setView('activity');
+      } else if (hash === '#payroll') {
+        setView('payroll');
       } else {
         setView('landing');
       }
@@ -1898,6 +1947,9 @@ function App() {
           if (success) {
             setClaimSuccess(true);
             setClaimLinkData(prev => prev ? { ...prev, status: 'claimed' } : null);
+            // Refresh balance immediately + retry to catch RPC indexing lag
+            refreshBalances();
+            [3000, 8000, 15000].forEach(ms => setTimeout(() => refreshBalances(), ms));
           } else {
             setClaimError('Failed to claim. Link may already be claimed or cancelled.');
           }
@@ -2375,19 +2427,44 @@ function App() {
                         </div>
 
                         {/* Claim button */}
-                        <button
-                          className="sl-btn sl-btn-primary"
-                          style={{ height: 38, padding: '0 18px', fontSize: 13, fontWeight: 700 }}
-                          onClick={async () => {
-                            try {
-                              await claimIncomingTransfer(transfer.id);
-                            } catch (e: any) {
-                              alert(e.message || 'Claim failed');
-                            }
-                          }}
-                        >
-                          <Icon name="arrowDown" size={14} /> Claim to wallet
-                        </button>
+                        {transferClaimState[transfer.id] === 'claimed' ? (
+                          <div className="sl-row" style={{ gap: 6, fontSize: 13, fontWeight: 600, color: 'var(--mint)', padding: '0 4px' }}>
+                            <Icon name="check" size={15} /> Added to wallet
+                          </div>
+                        ) : transferClaimState[transfer.id] === 'failed' ? (
+                          <div className="sl-col" style={{ gap: 2, alignItems: 'flex-end' }}>
+                            <span style={{ fontSize: 12, color: '#e05c5c' }}>Claim failed</span>
+                            <button
+                              className="sl-btn"
+                              style={{ fontSize: 12, padding: '3px 10px' }}
+                              onClick={() => setTransferClaimState(prev => { const n = {...prev}; delete n[transfer.id]; return n; })}
+                            >
+                              Retry
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            className="sl-btn sl-btn-primary"
+                            style={{ height: 38, padding: '0 18px', fontSize: 13, fontWeight: 700 }}
+                            disabled={transferClaimState[transfer.id] === 'claiming'}
+                            onClick={async () => {
+                              setTransferClaimState(prev => ({ ...prev, [transfer.id]: 'claiming' }));
+                              try {
+                                await claimIncomingTransfer(transfer.id);
+                                setTransferClaimState(prev => ({ ...prev, [transfer.id]: 'claimed' }));
+                                // Refresh balance immediately + retry to catch RPC lag
+                                refreshBalances();
+                                [3000, 8000, 15000].forEach(ms => setTimeout(() => refreshBalances(), ms));
+                              } catch (e: any) {
+                                setTransferClaimState(prev => ({ ...prev, [transfer.id]: 'failed' }));
+                              }
+                            }}
+                          >
+                            {transferClaimState[transfer.id] === 'claiming'
+                              ? <><div className="spinner" style={{ width: 13, height: 13, borderWidth: 1.5 }} /> Claiming…</>
+                              : <><Icon name="arrowDown" size={14} /> Claim to wallet</>}
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
