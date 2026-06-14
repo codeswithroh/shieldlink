@@ -1288,6 +1288,11 @@ const PayrollRoster: React.FC<{
   const [addError, setAddError] = useState('');
   const [adding, setAdding] = useState(false);
 
+  // CSV import
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importResult, setImportResult] = useState<{ added: number; skipped: { row: string; reason: string }[] } | null>(null);
+  const [importing, setImporting] = useState(false);
+
   // Pay run state
   const [payToken, setPayToken] = useState<'STRK' | 'USDC'>('STRK');
   const [amounts, setAmounts] = useState<Record<string, string>>({});
@@ -1331,6 +1336,106 @@ const PayrollRoster: React.FC<{
     await deleteRecipient(id);
     setAmounts(prev => { const next = { ...prev }; delete next[id]; return next; });
     await reload();
+  };
+
+  // Parse one CSV line, respecting simple double-quoted fields
+  const parseCsvLine = (line: string): string[] => {
+    const out: string[] = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = !inQuotes;
+      } else if (ch === ',' && !inQuotes) {
+        out.push(cur); cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur);
+    return out.map(s => s.trim());
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (e.target) e.target.value = ''; // allow re-importing the same file
+    if (!file) return;
+
+    setImporting(true);
+    setImportResult(null);
+    setAddError('');
+
+    let text = '';
+    try {
+      text = await file.text();
+    } catch {
+      setImportResult({ added: 0, skipped: [{ row: file.name, reason: 'Could not read file' }] });
+      setImporting(false);
+      return;
+    }
+
+    const rawLines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+
+    // Detect & drop a header row (contains "address" / "name" / "label" / "amount")
+    if (rawLines.length > 0) {
+      const first = rawLines[0].toLowerCase();
+      if (/\b(address|wallet|name|label|amount)\b/.test(first) && !first.includes('0x')) {
+        rawLines.shift();
+      }
+    }
+
+    const skipped: { row: string; reason: string }[] = [];
+    const seenInFile = new Set<string>();
+    const existing = new Set(recipients.map(r => r.walletAddress.toLowerCase()));
+    const newAmounts: Record<string, string> = {};
+    let added = 0;
+
+    for (const line of rawLines) {
+      const cols = parseCsvLine(line);
+      // Accept either (label, address) or (label, address, amount); also tolerate (address) only.
+      let label = '';
+      let addr = '';
+      let amount = '';
+      if (cols.length === 1) {
+        addr = cols[0];
+        label = addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : '';
+      } else {
+        [label, addr, amount = ''] = cols;
+      }
+
+      const display = line.length > 42 ? line.slice(0, 42) + '…' : line;
+
+      if (!addr.startsWith('0x') || addr.length < 10) {
+        skipped.push({ row: display, reason: 'Invalid address' });
+        continue;
+      }
+      const key = addr.toLowerCase();
+      if (existing.has(key)) { skipped.push({ row: display, reason: 'Already in roster' }); continue; }
+      if (seenInFile.has(key)) { skipped.push({ row: display, reason: 'Duplicate in file' }); continue; }
+      seenInFile.add(key);
+
+      const rec: RecipientRecord = {
+        id: `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        orgId: org.id,
+        label: label || `${addr.slice(0, 6)}…${addr.slice(-4)}`,
+        walletAddress: addr,
+        addedAtMs: Date.now(),
+      };
+      await saveRecipient(rec);
+      added++;
+
+      const amt = amount.replace(/[^0-9.]/g, '');
+      if (amt && parseFloat(amt) > 0) newAmounts[rec.id] = amt;
+    }
+
+    if (Object.keys(newAmounts).length > 0) {
+      setAmounts(prev => ({ ...prev, ...newAmounts }));
+    }
+    await reload();
+    setImportResult({ added, skipped });
+    setImporting(false);
   };
 
   const payableRows = recipients.filter(r => {
@@ -1424,7 +1529,26 @@ const PayrollRoster: React.FC<{
       {/* Add recipient form — hidden during an active run */}
       {!runStatuses && (
         <div className="sl-card sl-card-pad sl-col" style={{ gap: 14 }}>
-          <span className="sl-eyebrow">Add team member</span>
+          <div className="sl-between" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <span className="sl-eyebrow">Add team member</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: 'none' }}
+              onChange={handleImportFile}
+            />
+            <button
+              className="sl-btn"
+              style={{ height: 28, padding: '0 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              title="Import recipients from a CSV file (label, address, amount)"
+            >
+              <Icon name="arrowDown" size={13} />
+              {importing ? 'Importing…' : 'Import CSV'}
+            </button>
+          </div>
           <div className="sl-row" style={{ gap: 10, flexWrap: 'wrap' }}>
             <input
               className="sl-input"
@@ -1447,6 +1571,46 @@ const PayrollRoster: React.FC<{
             </button>
           </div>
           {addError && <span style={{ fontSize: 12, color: '#e05c5c' }}>{addError}</span>}
+          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+            CSV format: <span className="sl-mono">label, 0xaddress, amount</span> (amount optional · header row auto-detected)
+          </span>
+
+          {/* Import result */}
+          {importResult && (
+            <div className="sl-col" style={{
+              gap: 6, padding: '11px 13px', borderRadius: 10,
+              background: importResult.added > 0 ? 'var(--mint-bg)' : 'rgba(224,92,92,0.08)',
+              border: `1px solid ${importResult.added > 0 ? 'var(--mint-line)' : 'rgba(224,92,92,0.3)'}`,
+            }}>
+              <div className="sl-row" style={{ gap: 8, alignItems: 'center' }}>
+                <Icon name={importResult.added > 0 ? 'check' : 'info'} size={14} style={{ color: importResult.added > 0 ? 'var(--mint)' : '#e05c5c', flexShrink: 0 }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: importResult.added > 0 ? 'var(--mint)' : '#e05c5c' }}>
+                  {importResult.added} added
+                  {importResult.skipped.length > 0 ? ` · ${importResult.skipped.length} skipped` : ''}
+                </span>
+                <button
+                  className="sl-btn"
+                  style={{ marginLeft: 'auto', height: 22, padding: '0 8px', fontSize: 11, color: 'var(--text-3)', border: '1px solid var(--line)' }}
+                  onClick={() => setImportResult(null)}
+                >
+                  Dismiss
+                </button>
+              </div>
+              {importResult.skipped.length > 0 && (
+                <div className="sl-col" style={{ gap: 3, maxHeight: 120, overflowY: 'auto', paddingTop: 2 }}>
+                  {importResult.skipped.slice(0, 20).map((s, i) => (
+                    <div key={i} className="sl-row" style={{ gap: 8, fontSize: 11, color: 'var(--text-3)' }}>
+                      <span style={{ color: '#e05c5c', flexShrink: 0 }}>{s.reason}</span>
+                      <span className="sl-mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.row}</span>
+                    </div>
+                  ))}
+                  {importResult.skipped.length > 20 && (
+                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>…and {importResult.skipped.length - 20} more</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
