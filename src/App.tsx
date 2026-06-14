@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import QRCodeSVG from 'react-qr-code';
 import { useStarknetState, type MockWallet, type ShieldLinkData, type NoteEntry, FIXED_DENOMS, splitIntoNotes } from './hooks/useStarknetState';
 import { getOrg, saveOrg, getRecipients, saveRecipient, deleteRecipient,
-         savePayRun, type OrgRecord, type RecipientRecord, type PayRunRecord } from './utils/db';
+         savePayRun, getPayRuns, type OrgRecord, type RecipientRecord, type PayRunRecord } from './utils/db';
 
 // ─────────────────────────────────────────────────────────────
 // Icons Definition
@@ -31,6 +31,7 @@ const I: Record<string, React.ReactNode> = {
   payroll: <g><rect x="4" y="4" width="16" height="4" rx="1.5"/><rect x="4" y="10" width="16" height="4" rx="1.5"/><rect x="4" y="16" width="10" height="4" rx="1.5"/></g>,
   users: <g><circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/><circle cx="18" cy="9" r="2.5"/><path d="M22 20c0-2.5-1.8-4.5-4-4.5"/></g>,
   trash: <g><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></g>,
+  history: <g><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><polyline points="3 4 3 9 8 9"/><polyline points="12 7.5 12 12 15.5 14"/></g>,
 };
 
 interface IconProps {
@@ -1294,8 +1295,13 @@ const PayrollRoster: React.FC<{
   const [isRunning, setIsRunning] = useState(false);
   const [runDone, setRunDone] = useState(false);
 
+  // Pay run history
+  const [payRuns, setPayRuns] = useState<PayRunRecord[]>([]);
+  const [expandedRun, setExpandedRun] = useState<string | null>(null);
+
   const reload = () => getRecipients(org.id).then(r => { setRecipients(r); setLoading(false); });
-  useEffect(() => { reload(); }, [org.id]);
+  const reloadRuns = () => getPayRuns(org.id).then(setPayRuns);
+  useEffect(() => { reload(); reloadRuns(); }, [org.id]);
 
   const handleAdd = async () => {
     const label = labelInput.trim();
@@ -1387,6 +1393,7 @@ const PayrollRoster: React.FC<{
       txHashes,
     };
     await savePayRun(run);
+    await reloadRuns();
     setIsRunning(false);
     setRunDone(true);
   };
@@ -1628,6 +1635,92 @@ const PayrollRoster: React.FC<{
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── PAY RUN HISTORY ── */}
+      {!runStatuses && payRuns.length > 0 && (
+        <div className="sl-card sl-card-pad sl-col" style={{ gap: 12 }}>
+          <div className="sl-row" style={{ gap: 8, alignItems: 'center' }}>
+            <Icon name="history" size={15} style={{ color: 'var(--text-3)' }} />
+            <span className="sl-eyebrow">Past pay runs</span>
+            <span className="sl-chip" style={{ height: 20, fontSize: 10, marginLeft: 'auto' }}>
+              {payRuns.length}
+            </span>
+          </div>
+
+          <div className="sl-col" style={{ gap: 8 }}>
+            {payRuns.map(run => {
+              const succeeded = run.recipients.length;
+              const isOpen = expandedRun === run.id;
+              const when = new Date(run.completedAtMs ?? run.createdAtMs);
+              const dateLabel = when.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+              const timeLabel = when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+              return (
+                <div key={run.id} className="sl-card sl-col" style={{ background: 'var(--bg-3)', padding: 0, overflow: 'hidden' }}>
+                  {/* Summary row — click to expand */}
+                  <div
+                    className="sl-row"
+                    style={{ gap: 12, alignItems: 'center', padding: '11px 13px', cursor: 'pointer' }}
+                    onClick={() => setExpandedRun(isOpen ? null : run.id)}
+                  >
+                    <div style={{
+                      width: 30, height: 30, borderRadius: 8, background: 'var(--mint-bg)',
+                      border: '1px solid var(--mint-line)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: 'var(--mint)', flexShrink: 0,
+                    }}>
+                      <Icon name="payroll" size={14} />
+                    </div>
+                    <div className="sl-col sl-grow" style={{ gap: 1, overflow: 'hidden' }}>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>
+                        {succeeded} payment{succeeded !== 1 ? 's' : ''} · {run.recipients.length} recipient{run.recipients.length !== 1 ? 's' : ''}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{dateLabel} · {timeLabel}</span>
+                    </div>
+                    <div className="sl-col" style={{ alignItems: 'flex-end', gap: 1, flexShrink: 0 }}>
+                      <span className="sl-mono" style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.02em' }}>
+                        {run.totalAmount.toFixed(2)} {run.token}
+                      </span>
+                      <span style={{ fontSize: 10, color: 'var(--mint-2)' }}>total sent</span>
+                    </div>
+                    <Icon
+                      name="chevron"
+                      size={15}
+                      style={{ color: 'var(--text-3)', flexShrink: 0, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s ease' }}
+                    />
+                  </div>
+
+                  {/* Expanded per-recipient breakdown */}
+                  {isOpen && (
+                    <div className="sl-col" style={{ gap: 6, padding: '0 13px 12px', borderTop: '1px solid var(--line)' }}>
+                      {run.recipients.length === 0 && (
+                        <span style={{ fontSize: 12, color: 'var(--text-3)', paddingTop: 10 }}>No payments were sent in this run.</span>
+                      )}
+                      {run.recipients.map((rcp, idx) => (
+                        <div key={`${run.id}_${rcp.recipientId}_${idx}`} className="sl-row" style={{ gap: 10, alignItems: 'center', paddingTop: idx === 0 ? 10 : 0 }}>
+                          <div style={{
+                            width: 18, height: 18, borderRadius: '50%', background: 'var(--mint-bg)',
+                            border: '1px solid var(--mint-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                          }}>
+                            <Icon name="check" size={10} style={{ color: 'var(--mint)' }} />
+                          </div>
+                          <div className="sl-col sl-grow" style={{ gap: 1, overflow: 'hidden' }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 500 }}>{rcp.label}</span>
+                            <span className="sl-mono sl-dim" style={{ fontSize: 10 }}>
+                              {rcp.walletAddress.slice(0, 10)}…{rcp.walletAddress.slice(-6)}
+                            </span>
+                          </div>
+                          <span className="sl-mono" style={{ fontSize: 12.5, color: 'var(--text-2)', flexShrink: 0 }}>
+                            {rcp.amount} {run.token}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
