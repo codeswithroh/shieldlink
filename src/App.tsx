@@ -32,6 +32,8 @@ const I: Record<string, React.ReactNode> = {
   users: <g><circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/><circle cx="18" cy="9" r="2.5"/><path d="M22 20c0-2.5-1.8-4.5-4-4.5"/></g>,
   trash: <g><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></g>,
   history: <g><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><polyline points="3 4 3 9 8 9"/><polyline points="12 7.5 12 12 15.5 14"/></g>,
+  download: <g><path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M5 20h14"/></g>,
+  repeat: <g><polyline points="17 2 21 6 17 10"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 22 3 18 7 14"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></g>,
 };
 
 interface IconProps {
@@ -1303,6 +1305,7 @@ const PayrollRoster: React.FC<{
   // Pay run history
   const [payRuns, setPayRuns] = useState<PayRunRecord[]>([]);
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
+  const [repeatNote, setRepeatNote] = useState<string | null>(null);
 
   const reload = () => getRecipients(org.id).then(r => { setRecipients(r); setLoading(false); });
   const reloadRuns = () => getPayRuns(org.id).then(setPayRuns);
@@ -1367,7 +1370,7 @@ const PayrollRoster: React.FC<{
     setImportResult(null);
     setAddError('');
 
-    let text = '';
+    let text: string;
     try {
       text = await file.text();
     } catch {
@@ -1395,14 +1398,16 @@ const PayrollRoster: React.FC<{
     for (const line of rawLines) {
       const cols = parseCsvLine(line);
       // Accept either (label, address) or (label, address, amount); also tolerate (address) only.
-      let label = '';
-      let addr = '';
+      let label: string;
+      let addr: string;
       let amount = '';
       if (cols.length === 1) {
         addr = cols[0];
         label = addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : '';
       } else {
-        [label, addr, amount = ''] = cols;
+        label = cols[0] ?? '';
+        addr = cols[1] ?? '';
+        amount = cols[2] ?? '';
       }
 
       const display = line.length > 42 ? line.slice(0, 42) + '…' : line;
@@ -1451,6 +1456,7 @@ const PayrollRoster: React.FC<{
     if (!canRun) return;
     setIsRunning(true);
     setRunDone(false);
+    setRepeatNote(null);
 
     const initialStatuses: RunStatus[] = payableRows.map(r => ({
       recipientId: r.id,
@@ -1507,6 +1513,52 @@ const PayrollRoster: React.FC<{
     setRunStatuses(null);
     setRunDone(false);
     setAmounts({});
+    setRepeatNote(null);
+  };
+
+  // Export a past pay run as a CSV receipt
+  const handleExportRun = (run: PayRunRecord) => {
+    const esc = (v: string) => /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+    const header = ['label', 'address', 'amount', 'token'];
+    const rows = run.recipients.map(r => [r.label, r.walletAddress, String(r.amount), run.token].map(esc).join(','));
+    const csv = [header.join(','), ...rows].join('\r\n') + '\r\n';
+
+    const when = new Date(run.completedAtMs ?? run.createdAtMs);
+    const stamp = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}`;
+    const safeOrg = (org.name || 'org').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'org';
+    const filename = `payroll-${safeOrg}-${stamp}.csv`;
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Pre-fill the roster amounts from a past run so it can be repeated
+  const handleRepeatRun = (run: PayRunRecord) => {
+    setPayToken(run.token);
+    const byAddress = new Map(recipients.map(r => [r.walletAddress.toLowerCase(), r]));
+    const next: Record<string, string> = {};
+    let matched = 0;
+    let missing = 0;
+    for (const rcp of run.recipients) {
+      const found = byAddress.get(rcp.walletAddress.toLowerCase());
+      if (found) { next[found.id] = String(rcp.amount); matched++; }
+      else missing++;
+    }
+    setAmounts(next);
+    setExpandedRun(null);
+    setRepeatNote(
+      matched === 0
+        ? 'None of this run’s recipients are still in your roster. Re-add them, then try again.'
+        : `Loaded ${matched} amount${matched !== 1 ? 's' : ''} in ${run.token} from this run${missing > 0 ? ` · ${missing} recipient${missing !== 1 ? 's are' : ' is'} no longer in the roster` : ''}. Review and run.`
+    );
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
@@ -1525,6 +1577,24 @@ const PayrollRoster: React.FC<{
           <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{recipients.length} team member{recipients.length !== 1 ? 's' : ''}</span>
         </div>
       </div>
+
+      {/* Repeat-run note */}
+      {repeatNote && !runStatuses && (
+        <div className="sl-row" style={{
+          gap: 10, alignItems: 'center', padding: '11px 14px', borderRadius: 10,
+          background: 'var(--mint-bg)', border: '1px solid var(--mint-line)',
+        }}>
+          <Icon name="repeat" size={15} style={{ color: 'var(--mint)', flexShrink: 0 }} />
+          <span style={{ fontSize: 12.5, color: 'var(--text-2)', flex: 1 }}>{repeatNote}</span>
+          <button
+            className="sl-btn"
+            style={{ height: 24, padding: '0 9px', fontSize: 11, color: 'var(--text-3)', border: '1px solid var(--line)', flexShrink: 0 }}
+            onClick={() => setRepeatNote(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Add recipient form — hidden during an active run */}
       {!runStatuses && (
@@ -1879,6 +1949,28 @@ const PayrollRoster: React.FC<{
                           </span>
                         </div>
                       ))}
+
+                      {/* Run actions */}
+                      <div className="sl-row" style={{ gap: 8, paddingTop: 10, marginTop: 4, borderTop: '1px solid var(--line)', flexWrap: 'wrap' }}>
+                        <button
+                          className="sl-btn"
+                          style={{ height: 30, padding: '0 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+                          onClick={() => handleRepeatRun(run)}
+                          disabled={run.recipients.length === 0}
+                          title="Load these amounts into the roster to run again"
+                        >
+                          <Icon name="repeat" size={13} /> Repeat this run
+                        </button>
+                        <button
+                          className="sl-btn"
+                          style={{ height: 30, padding: '0 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+                          onClick={() => handleExportRun(run)}
+                          disabled={run.recipients.length === 0}
+                          title="Download a CSV receipt of this run"
+                        >
+                          <Icon name="download" size={13} /> Export CSV
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
